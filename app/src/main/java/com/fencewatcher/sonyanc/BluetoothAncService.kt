@@ -226,15 +226,23 @@ class BluetoothAncService : Service() {
                     // Blocking read loop — any data or -1 / IOException = disconnected
                     val inputStream = socket.inputStream
                     val buffer = ByteArray(1024)
-                    while (isActive) {
-                        val n = inputStream.read(buffer)
-                        if (n == -1) break // EOF = orderly disconnect
-                        // We don't parse responses for v1; just detect the socket drop
+                    try {
+                        while (isActive) {
+                            val n = inputStream.read(buffer)
+                            if (n == -1) break // EOF = orderly disconnect
+                        }
+                    } catch (e: IOException) {
+                        Log.w(tag, "BT error: IOException: ${e.message}")
                     }
 
-                    // If we got here the socket closed cleanly
-                    Log.d(tag, "Socket closed")
+                    // Socket closed — reconnect automatically
+                    Log.d(tag, "Socket closed — reconnecting")
+                    btSocket = null
                     status = Status.DISCONNECTED
+                    broadcastStatus(status, "Disconnected")
+                    updateNotification("Disconnected, reconnecting…")
+                    triggerReconnect()
+                    return@launch
                     broadcastStatus(status)
                     updateNotification("Disconnected")
 
