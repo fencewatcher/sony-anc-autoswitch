@@ -73,24 +73,28 @@ class MediaPlaybackMonitor(
         val allowlist = allowlistProvider()
         if (allowlist.isEmpty()) return true  // no filtering
 
-        // Try to find the *currently playing* package via UID (most accurate)
+        // Priority 1: currently-playing via UID (most accurate)
         val current = currentlyPlayingPackage()
         if (current != null) {
-            Log.d(tag, "Active player UID → package: $current | allowlist: $allowlist")
+            Log.d(tag, "Active player UID → $current | allowlist: $allowlist")
             return current in allowlist
         }
 
-        // Fallback: notification-tracked packages
+        // Priority 2: notification-tracked packages
         val active = activeMediaPackages()
-        Log.d(tag, "Active media packages (notif): $active | allowlist: $allowlist")
+        Log.d(tag, "Notification-tracked packages: $active | allowlist: $allowlist")
 
-        if (active.isEmpty()) return false
-        // Single tracked app — check it
-        if (active.size == 1) return active.first() in allowlist
+        if (active.isNotEmpty()) {
+            if (active.size == 1) return active.first() in allowlist
+            // Multiple tracked — require ALL in allowlist (conservative when ambiguous)
+            return active.all { it in allowlist }
+        }
 
-        // Multiple tracked and can't determine the active player:
-        // conservative — require ALL tracked apps to be in the allowlist
-        return active.all { it in allowlist }
+        // All detection failed (UID blocked on 14+, notif not granted/not posted yet).
+        // Default to ALLOW so the core feature works. The user can verify notif access
+        // is enabled for proper filtering.
+        Log.w(tag, "Cannot detect active app — defaulting to ALLOW. Grant notification access for filtering.")
+        return true
     }
 
     /**
