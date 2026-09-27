@@ -6,12 +6,15 @@
 1. Pair your WH-1000XM6 (or XM5) with your phone
 2. Select it from the dropdown above
 3. Tap "Start Service"
-4. When you play media → ANC turns on
-5. When you pause → Ambient sound mode engages
+4. When an allowed app plays media → ANC turns on
+5. When it pauses → Ambient sound mode engages (level 1-20, optional voice focus)
 
 The service runs in the background until you stop it.
+
+To filter which apps trigger ANC, enable "Only trigger for selected apps" and choose them. For reliable app detection on Android 14+, enable notification access via the button above.
 
 Protocol: MDR framing over Bluetooth RFCOMM
 (service UUID 956c7b26-…)
 Originally reverse-engineered by Gadgetbridge.</string>
+    <string name="settings_text">⚙️ SETTINGS\nAmbient level: how loud ambient sound is when paused (1 = faint, 20 = loudest).\n\nFocus on voice: keeps voices audible over ambient noise.</string>
 </resources>

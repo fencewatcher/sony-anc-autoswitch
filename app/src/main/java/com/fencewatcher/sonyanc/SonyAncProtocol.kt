@@ -30,14 +30,15 @@ object SonyAncProtocol {
         0x00,               // naSensitivity = 0
     )
 
-    val AMBIENT = byteArrayOf(
+    /** Builds an ambient-mode payload with configurable level (1-20) and voice passthrough. */
+    fun ambient(level: Int, voice: Boolean): ByteArray = byteArrayOf(
         0x68, 0x19, 0x01,
-        0x01,               // enable = ON
-        0x01,               // mode = ambient
-        0x00,               // ambientVoice = off
-        0x14,               // level = 20
-        0x00,               // noiseAdaptive = off
-        0x00,               // naSensitivity = 0
+        0x01,                        // enable = ON
+        0x01,                        // mode = ambient
+        if (voice) 0x01 else 0x00,   // ambientVoice
+        level.coerceIn(1, 20).toByte(),
+        0x00,                        // noiseAdaptive = off
+        0x00,                        // naSensitivity = 0
     )
 
     val ANC_OFF = byteArrayOf(
@@ -49,6 +50,18 @@ object SonyAncProtocol {
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
+
+    /** Human-readable name for a payload (for logging / notification). */
+    fun describe(payload: ByteArray): String {
+        if (payload.contentEquals(ANC_ON)) return "NC"
+        if (payload.contentEquals(ANC_OFF)) return "Off"
+        if (payload.size == 9 && (payload[0].toInt() and 0xFF) == 0x68 &&
+            (payload[3].toInt() and 0xFF) == 0x01 && (payload[4].toInt() and 0xFF) == 0x01
+        ) {
+            return "Ambient ${payload[6].toInt() and 0xFF}"
+        }
+        return describePayload(payload)
+    }
 
     fun buildFrame(seq: Int, payload: ByteArray): ByteArray {
         require(seq in 0..1) { "seq must be 0 or 1, got $seq" }

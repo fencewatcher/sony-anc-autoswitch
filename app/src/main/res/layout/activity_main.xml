@@ -97,6 +97,105 @@
             android:gravity="center"
             android:layout_marginBottom="16dp" />
 
+        <!-- Settings card -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:background="@color/surface"
+            android:textColor="#FFBBBBBB"
+            android:textSize="13sp"
+            android:lineSpacingExtra="2dp"
+            android:text="@string/settings_text" />
+
+        <!-- Ambient level -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ambient level:"
+            android:textSize="14sp"
+            android:textColor="@color/on_surface"
+            android:paddingTop="16dp"
+            android:layout_marginBottom="4dp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginBottom="4dp">
+
+            <TextView
+                android:id="@+id/textLevelValue"
+                android:layout_width="48dp"
+                android:layout_height="wrap_content"
+                android:text="20"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface" />
+
+            <SeekBar
+                android:id="@+id/seekLevel"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:max="19"
+                android:progress="19" />
+        </LinearLayout>
+
+        <!-- Voice passthrough -->
+        <Switch
+            android:id="@+id/switchVoice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Focus on voice (voice passthrough)"
+            android:textColor="@color/on_surface"
+            android:layout_marginTop="8dp" />
+
+        <!-- App allowlist -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Trigger apps:"
+            android:textSize="14sp"
+            android:textColor="@color/on_surface"
+            android:paddingTop="16dp"
+            android:layout_marginBottom="4dp" />
+
+        <Switch
+            android:id="@+id/switchAllowlist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Only trigger for selected apps"
+            android:textColor="@color/on_surface" />
+
+        <Button
+            android:id="@+id/btnChooseApps"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Choose apps…"
+            android:textColor="@android:color/white"
+            android:backgroundTint="#FF445577"
+            android:layout_marginTop="8dp" />
+
+        <TextView
+            android:id="@+id/textSelectedApps"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textSize="12sp"
+            android:textColor="#FFAAAAAA"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="8dp" />
+
+        <Button
+            android:id="@+id/btnNotifAccess"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:text="Enable app detection (notification access)"
+            android:textColor="@android:color/white"
+            android:backgroundTint="#FF774444"
+            android:layout_marginTop="8dp" />
+
         <!-- Info card -->
         <TextView
             android:layout_width="match_parent"
@@ -106,6 +205,7 @@
             android:textColor="#FFBBBBBB"
             android:textSize="12sp"
             android:lineSpacingExtra="4dp"
+            android:layout_marginTop="16dp"
             android:text="@string/info_text" />
 
         <!-- Version indicator -->

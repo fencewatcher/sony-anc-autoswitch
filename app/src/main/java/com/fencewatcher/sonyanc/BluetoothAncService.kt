@@ -19,14 +19,11 @@ import kotlinx.coroutines.*
 import java.util.UUID
 
 /**
- * Foreground service that connects to Sony WH-1000XM5/XM6 headphones
+ * Foreground service that connects to Sony WH-1000XM6 headphones
  * over Bluetooth RFCOMM and sends ANC commands based on media playback state.
  *
  * Protocol: MDR framing on RFCOMM, UUID 956c7b26-…
- *
- * Lifecycle:
- *   Start via [startService] with action=[ACTION_START], extra=[EXTRA_ADDRESS]
- *   Stop via [startService] with action=[ACTION_STOP]
+ * Incoming frames are ACKed (stop-and-wait) and parsed for battery/mode.
  */
 class BluetoothAncService : Service() {
 
@@ -39,6 +36,8 @@ class BluetoothAncService : Service() {
     private var currentSeq = 0
     private var isMediaPlaying = false
     private var deviceAddress: String? = null
+    private var batteryPercent: Int? = null
+    private var currentModeName: String = "—"
 
     // ---- Lifecycle ----
 
@@ -55,10 +54,12 @@ class BluetoothAncService : Service() {
                     val address = intent.getStringExtra(EXTRA_ADDRESS)
                         ?: run {
                             Log.w(tag, "START without device address, ignoring")
+                            broadcastStatus(Status.ERROR, "No device address")
                             stopSelf()
                             return START_NOT_STICKY
                         }
                     deviceAddress = address
+                    isRunning = true
                     Log.d(tag, "Starting service, device=$address")
                     safeStartForeground()
                     serviceInit(address)
@@ -66,6 +67,10 @@ class BluetoothAncService : Service() {
 
                 ACTION_STOP -> {
                     Log.d(tag, "Stopping service")
+                    isRunning = false
+                    status = Status.DISCONNECTED
+                    broadcastStatus(status, "Stopped")
+                    try { btSocket?.close() } catch (_: Exception) {}
                     stopSelf()
                 }
 
@@ -75,14 +80,12 @@ class BluetoothAncService : Service() {
 
                 ACTION_ANC_ON -> {
                     Log.d(tag, "Debug: manual ANC ON")
-                    isMediaPlaying = true
                     scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_ON) }
                 }
 
                 ACTION_AMBIENT -> {
                     Log.d(tag, "Debug: manual AMBIENT")
-                    isMediaPlaying = false
-                    scope.launch { sendAncCommandOnce(SonyAncProtocol.AMBIENT) }
+                    scope.launch { sendAncCommandOnce(sonyAmbientCommand()) }
                 }
 
                 ACTION_ANC_OFF -> {
@@ -115,8 +118,10 @@ class BluetoothAncService : Service() {
 
     override fun onDestroy() {
         Log.d(tag, "Destroying service")
+        isRunning = false
         mediaMonitor?.stop()
         mediaMonitor = null
+        refreshJob?.cancel()
         // Close socket first to unblock the read() loop in the coroutine
         try {
             btSocket?.close()
@@ -128,6 +133,25 @@ class BluetoothAncService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    // ---- Settings ----
+
+    private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+
+    private fun ambientLevel(): Int =
+        prefs().getInt(KEY_AMBIENT_LEVEL, 20).coerceIn(1, 20)
+
+    private fun voicePassthrough(): Boolean =
+        prefs().getBoolean(KEY_VOICE_PASSTHROUGH, false)
+
+    private fun allowlistEnabled(): Boolean =
+        prefs().getBoolean(KEY_ALLOWLIST_ENABLED, false)
+
+    private fun allowlist(): Set<String> =
+        prefs().getStringSet(KEY_ALLOWLIST, emptySet()) ?: emptySet()
+
+    private fun sonyAmbientCommand(): ByteArray =
+        SonyAncProtocol.ambient(ambientLevel(), voicePassthrough())
+
     // ---- Initialisation ----
 
     private fun serviceInit(address: String) {
@@ -135,8 +159,13 @@ class BluetoothAncService : Service() {
         broadcastStatus(status)
         updateNotification("Connecting…")
 
-        // Start media playback monitoring immediately
-        mediaMonitor = MediaPlaybackMonitor(this) { playing ->
+        // Start media playback monitoring immediately (with app filtering)
+        mediaMonitor = MediaPlaybackMonitor(
+            this,
+            allowlistProvider = {
+                if (allowlistEnabled()) allowlist() else emptySet()
+            },
+        ) { playing ->
             onMediaStateChanged(playing)
         }
         mediaMonitor?.start()
@@ -220,8 +249,19 @@ class BluetoothAncService : Service() {
                     delay(200L)
 
                     Log.d(tag, "Handshake complete — sending active ANC command")
-                    val initialCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
-                    sendFrame(initialCmd)
+                    sendCommandForPlaybackState()
+
+                    // Periodic battery refresh (every 60s) + ANC state re-sync
+                    refreshJob?.cancel()
+                    refreshJob = launch {
+                        while (isActive && btSocket != null) {
+                            delay(60_000L)
+                            if (!isActive || btSocket == null) break
+                            sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
+                            delay(500L)
+                            sendCommandForPlaybackState()
+                        }
+                    }
 
                     // Blocking read loop — any data or -1 / IOException = disconnected
                     val inputStream = socket.inputStream
@@ -239,7 +279,7 @@ class BluetoothAncService : Service() {
                                     if (frame.dataType != 0x01) {
                                         val ackSeq = (frame.sequence xor 1) and 0xFF
                                         sendAck(ackSeq)
-                                        Log.d(tag, "ACK seq=$ackSeq for frame type=${frame.dataType.toInt().toString(16)} seq=${frame.sequence}")
+                                        parseIncoming(frame)
                                     }
                                 }
                             }
@@ -256,8 +296,6 @@ class BluetoothAncService : Service() {
                     updateNotification("Disconnected, reconnecting…")
                     triggerReconnect()
                     return@launch
-                    broadcastStatus(status)
-                    updateNotification("Disconnected")
 
                 } catch (e: CancellationException) {
                     throw e  // Propagate cancellation
@@ -283,6 +321,38 @@ class BluetoothAncService : Service() {
                 status = Status.ERROR
                 broadcastStatus(status, "All $MAX_RETRIES connection retries failed")
                 updateNotification("Connection failed")
+            }
+        }
+    }
+
+    // ---- Incoming frame parsing (battery + ANC state) ----
+
+    private fun parseIncoming(frame: MdrFrame) {
+        val p = frame.payload
+        if (p.size < 2) return
+        val cmd = p[0].toInt() and 0xFF
+        when (cmd) {
+            0x23, 0x25 -> {  // battery RET / NTFY (single battery)
+                if (p.size >= 3) {
+                    batteryPercent = p[2].toInt() and 0xFF
+                    Log.d(tag, "Battery: $batteryPercent%")
+                    refreshNotification()
+                }
+            }
+            0x67, 0x69 -> {  // NCASM RET / NTFY — mode may have changed on-device
+                if (p.size >= 4) {
+                    val idx = if (p.size >= 9) 3 else 2
+                    val totalEffect = p[idx].toInt() and 0xFF
+                    val mode = p[idx + 1].toInt() and 0xFF
+                    val level = if (p.size >= idx + 4) p[idx + 3].toInt() and 0xFF else 0
+                    currentModeName = when {
+                        totalEffect == 0x00 -> "Off"
+                        mode == 0x01 -> "Ambient $level"
+                        else -> "NC"
+                    }
+                    Log.d(tag, "Headphones report mode: $currentModeName")
+                    refreshNotification()
+                }
             }
         }
     }
@@ -369,53 +439,14 @@ class BluetoothAncService : Service() {
         // Wait a moment for headphone audio state to settle, then send
         scope.launch {
             delay(300L)  // brief settle, then send immediately
-            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
-            sendFrame(cmd)
+            sendCommandForPlaybackState()
         }
     }
 
-    /**
-     * Sends an ANC command twice with ALTERNATING seq bits so both
-     * attempts are independently processed by the headphones.
-     *
-     * If the first frame is received but not applied, the second
-     * arrives on a new seq and gets processed as a fresh command.
-     * If the first was applied, the second applies the same command
-     * again (harmless idempotent apply).
-     *
-     * After both sends, [currentSeq] is restored to the original
-     * value so the next call alternates correctly from the last
-     * seq the headphones saw.
-     */
-    private suspend fun sendAncCommandReliable(payload: ByteArray) {
-        val firstSeq = currentSeq
-        val name = when {
-            payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
-            payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
-            payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
-            else -> "CUSTOM"
-        }
-        // Send 5 rapid bursts with alternating seq so every frame is new
-        val passes = listOf(firstSeq, firstSeq xor 1, firstSeq, firstSeq xor 1, firstSeq)
-        for ((i, seq) in passes.withIndex()) {
-            if (btSocket == null) break
-            try {
-                val frame = SonyAncProtocol.buildFrame(seq, payload)
-                btSocket?.outputStream?.write(frame)
-                btSocket?.outputStream?.flush()
-                Log.d(tag, "Sent $name seq=$seq (burst ${i + 1}) — ${
-                    payload.joinToString(" ") { "%02x".format(it) }
-                }")
-            } catch (e: Exception) {
-                Log.w(tag, "$name burst ${i + 1} failed: ${e.message}")
-                btSocket = null
-                try { btSocket?.close() } catch (_: Exception) {}
-                triggerReconnect()
-                return
-            }
-            if (i < passes.size - 1) Thread.sleep(200L)
-        }
-        currentSeq = passes.last().xor(1)
+    /** Sends NC when media is playing, configured ambient otherwise. */
+    private fun sendCommandForPlaybackState() {
+        val cmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else sonyAmbientCommand()
+        sendFrame(cmd)
     }
 
     /**
@@ -423,14 +454,7 @@ class BluetoothAncService : Service() {
      * so a single frame is enough. Uses [sendFrame] to keep it simple.
      */
     private fun sendAncCommandOnce(payload: ByteArray) {
-        Log.d(tag, "Single: ${
-            when {
-                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
-                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
-                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
-                else -> "CUSTOM"
-            }
-        } — ${SonyAncProtocol.describePayload(payload)}")
+        Log.d(tag, "Single: ${SonyAncProtocol.describe(payload)} — ${SonyAncProtocol.describePayload(payload)}")
         sendFrame(payload)
     }
 
@@ -446,6 +470,11 @@ class BluetoothAncService : Service() {
             socket.outputStream.flush()
             Log.d(tag, "Frame ${payload.joinToString(" ") { "%02x".format(it) }} seq=$currentSeq")
             currentSeq = currentSeq xor 1
+
+            // Track the mode we last commanded (for notification stats)
+            if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == 0x68) {
+                currentModeName = SonyAncProtocol.describe(payload)
+            }
         } catch (e: Exception) {
             Log.w(tag, "Frame send failed: ${e.message}")
             btSocket = null
@@ -530,31 +559,6 @@ class BluetoothAncService : Service() {
 
     private data class MdrFrame(val dataType: Int, val sequence: Int, val payload: ByteArray)
 
-    /**
-     * Legacy single-send kept for initial connection flow.
-     */
-    private fun sendAncCommand(payload: ByteArray) {
-        val socket = btSocket ?: return
-        try {
-            val name = when {
-                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
-                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
-                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
-                else -> "CUSTOM"
-            }
-            val frame = SonyAncProtocol.buildFrame(currentSeq, payload)
-            socket.outputStream.write(frame)
-            socket.outputStream.flush()
-            Log.d(tag, "Sent $name seq=$currentSeq (single)")
-            currentSeq = currentSeq xor 1
-        } catch (e: Exception) {
-            Log.w(tag, "Write failed: ${e.message} — triggering reconnect")
-            btSocket = null
-            try { socket.close() } catch (_: Exception) {}
-            triggerReconnect()
-        }
-    }
-
     private fun triggerReconnect() {
         val addr = deviceAddress ?: return
         // First close old socket to unblock the read() loop
@@ -611,9 +615,24 @@ class BluetoothAncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        // Quick stats: battery + current mode
+        val stats = buildString {
+            if (batteryPercent != null) {
+                append("🔋 $batteryPercent%")
+            }
+            if (currentModeName != "—") {
+                if (isNotEmpty()) append(" · ")
+                append("🎧 $currentModeName")
+            }
+        }
+
+        val title = "Sony ANC Auto-Switch"
+        val content = if (stats.isNotEmpty()) "$text — $stats" else text
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Sony ANC Auto-Switch")
-            .setContentText(text)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent)
@@ -630,6 +649,18 @@ class BluetoothAncService : Service() {
         } catch (_: Exception) {
             // Race on early startup
         }
+    }
+
+    /** Refreshes the notification with current stats without changing the main text. */
+    private fun refreshNotification() {
+        // Reuse last text by rebuilding with stats (battery/mode changed)
+        val base = when (status) {
+            Status.CONNECTED -> if (isMediaPlaying) "▶ Playing" else "⏸ Paused"
+            Status.CONNECTING -> "Connecting…"
+            Status.DISCONNECTED -> "Disconnected"
+            Status.ERROR -> "Error"
+        }
+        updateNotification(base)
     }
 
     // ---- Status broadcasting ----
@@ -658,6 +689,10 @@ class BluetoothAncService : Service() {
         const val TAG = "BTAncSvc"
         const val PACKAGE = "com.fencewatcher.sonyanc"
 
+        // Running state shared with the UI
+        @Volatile
+        var isRunning = false
+
         // Service UUID from Gadgetbridge reverse-engineering
         const val SERVICE_UUID = "956c7b26-d49a-4ba8-b03f-b17d393cb6e2"
 
@@ -681,6 +716,13 @@ class BluetoothAncService : Service() {
         // Notification
         const val CHANNEL_ID = "sony_anc_service"
         const val NOTIFICATION_ID = 1
+
+        // Settings
+        const val PREFS_NAME = "anc_settings"
+        const val KEY_AMBIENT_LEVEL = "ambient_level"
+        const val KEY_VOICE_PASSTHROUGH = "voice_passthrough"
+        const val KEY_ALLOWLIST_ENABLED = "allowlist_enabled"
+        const val KEY_ALLOWLIST = "allowlist_apps"
 
         // Reconnection
         private const val MAX_RETRIES = 20
