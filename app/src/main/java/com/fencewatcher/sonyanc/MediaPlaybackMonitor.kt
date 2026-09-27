@@ -35,8 +35,7 @@ class MediaPlaybackMonitor(
         object : AudioManager.AudioPlaybackCallback() {
             override fun onPlaybackConfigChanged(configs: MutableList<AudioPlaybackConfiguration>) {
                 val isActive = configs.any {
-                    // ACTIVE_STATE_ACTIVE = 1
-                    (it.activeState == 1)
+                    it.getActiveState() == AudioPlaybackConfiguration.ACTIVE_STATE_ACTIVE
                 }
                 if (isActive != lastReportedPlaying) {
                     Log.d(tag, "AudioPlaybackCallback: ${if (isActive) "PLAYING" else "PAUSED"}")
