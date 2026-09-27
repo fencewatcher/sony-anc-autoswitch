@@ -382,7 +382,9 @@ class BluetoothAncService : Service() {
                 val frame = SonyAncProtocol.buildFrame(seq, payload)
                 btSocket?.outputStream?.write(frame)
                 btSocket?.outputStream?.flush()
-                Log.d(tag, "Sent $name seq=$seq (burst ${i + 1})")
+                Log.d(tag, "Sent $name seq=$seq (burst ${i + 1}) — ${
+                    payload.joinToString(" ") { "%02x".format(it) }
+                }")
             } catch (e: Exception) {
                 Log.w(tag, "$name burst ${i + 1} failed: ${e.message}")
                 btSocket = null

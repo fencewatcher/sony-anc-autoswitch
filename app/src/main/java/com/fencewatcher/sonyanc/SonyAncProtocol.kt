@@ -19,15 +19,15 @@ object SonyAncProtocol {
     private const val ESC: Byte = 0x3D
     private const val DATA_TYPE = 0x0C
 
-    // 68 19 01 <vcs=1> <totalEffect> <level> <mode> <ambientVoice> <na> <naSens>
+    // 68 19 01 <vcs=1> <totalEffect> <ambientVoice> <level> <mode> <na> <naSens>
 
     val ANC_ON = byteArrayOf(
         0x68, 0x19, 0x01,
         0x01,               // vcs
         0x01,               // totalEffect = ON
+        0x00,               // ambientVoice = off
         0x14,               // level = 20
         0x00,               // mode = NC
-        0x00,               // ambientVoice = off
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
@@ -36,9 +36,9 @@ object SonyAncProtocol {
         0x68, 0x19, 0x01,
         0x01,               // vcs
         0x01,               // totalEffect = ON
+        0x00,               // ambientVoice = off
         0x14,               // level = 20
         0x01,               // mode = ambient
-        0x00,               // ambientVoice = off
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
@@ -47,9 +47,9 @@ object SonyAncProtocol {
         0x68, 0x19, 0x01,
         0x01,               // vcs
         0x00,               // totalEffect = OFF
+        0x00,               // ambientVoice = off
         0x14,               // level = 20
         0x00,               // mode = N/A
-        0x00,               // ambientVoice = off
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
