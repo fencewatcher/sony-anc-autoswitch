@@ -45,7 +45,11 @@ android {
 
     // Inject git commit hash into BuildConfig
     val gitHash = try {
-        "git rev-parse --short HEAD".execute().text.trim()
+        val proc = Runtime.getRuntime().exec(
+            arrayOf("git", "rev-parse", "--short", "HEAD"),
+            null, project.rootDir
+        )
+        proc.inputStream.bufferedReader().readText().trim()
     } catch (_: Exception) { "dev" }
 
     defaultConfig {
