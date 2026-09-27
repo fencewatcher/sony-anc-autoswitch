@@ -164,6 +164,14 @@ class BluetoothAncService : Service() {
                     broadcastStatus(status, "Connecting…")
                     updateNotification("Connecting…")
 
+                    // Cancel discovery — required before RFCOMM on Android
+                    try {
+                        if (adapter.isDiscovering) {
+                            adapter.cancelDiscovery()
+                            Log.d(tag, "Cancelled BT discovery before socket creation")
+                        }
+                    } catch (_: Exception) {}
+
                     // Try multiple connection methods — Sony RFCOMM is finicky
                     val socket = createSonyRfcommSocket(device)
                     btSocket = socket
