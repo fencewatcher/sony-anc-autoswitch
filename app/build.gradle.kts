@@ -3,6 +3,15 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// Inject git commit hash into BuildConfig
+val gitHash = try {
+    val proc = Runtime.getRuntime().exec(
+        arrayOf("git", "rev-parse", "--short", "HEAD"),
+        null, rootDir
+    )
+    proc.inputStream.bufferedReader().readText().trim()
+} catch (_: Exception) { "dev" }
+
 android {
     namespace = "com.fencewatcher.sonyanc"
     compileSdk = 34
@@ -13,6 +22,8 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "BUILD_HASH", "\"$gitHash\"")
 
         vectorDrawables {
             useSupportLibrary = true
@@ -42,19 +53,6 @@ android {
         viewBinding = true
         buildConfig = true
     }
-
-    // Inject git commit hash into BuildConfig
-    val gitHash = try {
-        val proc = Runtime.getRuntime().exec(
-            arrayOf("git", "rev-parse", "--short", "HEAD"),
-            null, project.rootDir
-        )
-        proc.inputStream.bufferedReader().readText().trim()
-    } catch (_: Exception) { "dev" }
-
-    defaultConfig {
-        buildConfigField("String", "BUILD_HASH", "\"$gitHash\"")
-        buildConfigField("String", "BUILD_TIME", "\"${System.currentTimeMillis()}\"")
 }
 
 dependencies {
