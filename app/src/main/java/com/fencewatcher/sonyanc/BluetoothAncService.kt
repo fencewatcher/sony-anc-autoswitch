@@ -226,10 +226,23 @@ class BluetoothAncService : Service() {
                     // Blocking read loop — any data or -1 / IOException = disconnected
                     val inputStream = socket.inputStream
                     val buffer = ByteArray(1024)
+                    val frameDecoder = MdrFrameDecoder()
                     try {
                         while (isActive) {
                             val n = inputStream.read(buffer)
                             if (n == -1) break // EOF = orderly disconnect
+                            if (n > 0) {
+                                val frames = frameDecoder.feed(buffer.copyOfRange(0, n))
+                                for (frame in frames) {
+                                    // Stop-and-wait: every non-ACK frame must be ACKed
+                                    // with flipped sequence bit, or the XM6 closes the channel.
+                                    if (frame.dataType != 0x01) {
+                                        val ackSeq = (frame.sequence xor 1) and 0xFF
+                                        sendAck(ackSeq)
+                                        Log.d(tag, "ACK seq=$ackSeq for frame type=${frame.dataType.toInt().toString(16)} seq=${frame.sequence}")
+                                    }
+                                }
+                            }
                         }
                     } catch (e: IOException) {
                         Log.w(tag, "BT error: IOException: ${e.message}")
@@ -440,6 +453,82 @@ class BluetoothAncService : Service() {
             triggerReconnect()
         }
     }
+
+    /**
+     * Send a protocol ACK frame (dataType=0x01, flipped seq, empty payload).
+     */
+    private fun sendAck(seq: Int) {
+        val socket = btSocket ?: return
+        try {
+            // body: dataType(0x01) seq size(4×0x00) — checksum = sum
+            val check = (0x01 + seq) and 0xFF
+            val frame = byteArrayOf(0x3E, 0x01, seq.toByte(), 0x00, 0x00, 0x00, 0x00, check.toByte(), 0x3C)
+            socket.outputStream.write(frame)
+            socket.outputStream.flush()
+        } catch (_: Exception) {
+            // ACK failure is fine; the read loop will detect a real disconnect
+        }
+    }
+
+    /**
+     * Incremental MDR frame decoder: feeds raw bytes, emits complete frames.
+     * Handles byte-stuffing (0x3D escape) and checksum validation.
+     */
+    private class MdrFrameDecoder {
+        private val buffer = java.io.ByteArrayOutputStream()
+        private var inFrame = false
+        private var escaping = false
+
+        fun feed(bytes: ByteArray): List<MdrFrame> {
+            val frames = mutableListOf<MdrFrame>()
+            for (b in bytes) {
+                val v = b.toInt() and 0xFF
+                if (!inFrame) {
+                    if (v == 0x3E) {
+                        inFrame = true
+                        buffer.reset()
+                        escaping = false
+                    }
+                    continue
+                }
+                if (escaping) {
+                    buffer.write((v + 0x10) and 0xFF)
+                    escaping = false
+                    continue
+                }
+                when (v) {
+                    0x3D -> escaping = true
+                    0x3C -> {
+                        inFrame = false
+                        parse(buffer.toByteArray())?.let { frames.add(it) }
+                    }
+                    0x3E -> {
+                        buffer.reset()  // resync on unexpected SOF
+                    }
+                    else -> buffer.write(v)
+                }
+            }
+            return frames
+        }
+
+        private fun parse(inner: ByteArray): MdrFrame? {
+            if (inner.size < 7) return null  // type + seq + 4 size + checksum min
+            val len = ((inner[2].toInt() and 0xFF) shl 24) or
+                ((inner[3].toInt() and 0xFF) shl 16) or
+                ((inner[4].toInt() and 0xFF) shl 8) or
+                (inner[5].toInt() and 0xFF)
+            if (inner.size != 6 + len + 1) return null
+            val sum = inner.dropLast(1).fold(0) { acc, x -> acc + (x.toInt() and 0xFF) } and 0xFF
+            if (sum != (inner.last().toInt() and 0xFF)) return null
+            return MdrFrame(
+                dataType = inner[0].toInt() and 0xFF,
+                sequence = inner[1].toInt() and 0xFF,
+                payload = inner.copyOfRange(6, 6 + len),
+            )
+        }
+    }
+
+    private data class MdrFrame(val dataType: Int, val sequence: Int, val payload: ByteArray)
 
     /**
      * Legacy single-send kept for initial connection flow.
