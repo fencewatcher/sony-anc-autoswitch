@@ -191,7 +191,7 @@ class BluetoothAncService : Service() {
                         while (isActive && btSocket != null) {
                             delay(15_000L)
                             if (!isActive || btSocket == null) break
-                            val currentCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_XM6
+                            val currentCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
                             sendAncCommandReliable(currentCmd)
                         }
                     }
@@ -326,7 +326,7 @@ class BluetoothAncService : Service() {
         // Wait a moment for headphone audio state to settle, then send
         scope.launch {
             delay(300L)  // brief settle, then send immediately
-            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_7
+            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
             sendAncCommandReliable(cmd)
         }
     }
@@ -349,7 +349,6 @@ class BluetoothAncService : Service() {
         val name = when {
             payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
             payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
-            payload.contentEquals(SonyAncProtocol.AMBIENT_XM6) -> "AMBIENT_XM6"
             payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
             else -> "CUSTOM"
         }

@@ -3,14 +3,19 @@ package com.fencewatcher.sonyanc
 import java.io.ByteArrayOutputStream
 
 /**
- * Sony WH-1000XM5/XM6 Bluetooth control protocol (MDR framing).
+ * Sony WH-1000XM6 Bluetooth control protocol (MDR-v2 framing).
+ *
+ * **XM6 uses sub-type 0x19** (not 0x17 as on the XM4/XM5) and a 9-byte
+ * NCASM_SET_PARAM payload:
+ *
+ *   68 19 01 <vcs> <totalEffect> <mode> <ambientVoice> <level> <na> <naSens>
  *
  * Frame: SOF(0x3E) | escape(DATA_TYPE seq SIZE-bigendian-4b PAYLOAD CHECKSUM) | EOF(0x3C)
  * Escape: 0x3C→0x3D 0x2C, 0x3D→0x3D 0x2D, 0x3E→0x3D 0x2E
  * Checksum: sum(DATA_TYPE + seq + SIZE + PAYLOAD) mod 256
  * Seq: alternates 0→1→0…, resets on reconnect
  *
- * @see <a href="https://github.com/MamaJo3/sony-mx5-desktop-toggle/blob/main/docs/PROTOCOL.md">Protocol docs</a>
+ * @see <a href="https://github.com/PrathameshSujgure-git/xm6-control">xm6-control (verfied on XM6 FW 3.0.0)</a>
  */
 object SonyAncProtocol {
 
@@ -22,64 +27,43 @@ object SonyAncProtocol {
     // ---- data type for control commands ----
     private const val DATA_TYPE = 0x0C
 
-    // ---- ANC payloads ----
-    // 68 17 01 <ascOnOff> <ambientFlag> <wind> <focusOnVoice> <level>
-    // XM3/XM4 7-byte: 68 17 01 <ascOnOff> <ambientFlag> <level>
+    // ---- ANC payloads (XM6, sub-type 0x19, 9 bytes) ----
+    // 68 19 01 <vcs> <totalEffect> <mode> <ambientVoice> <level> <na> <naSensitivity>
 
-    // ---- XM5-style (8 bytes, v2 with wind reduction) ----
-    
+    /** Noise cancelling ON */
     val ANC_ON = byteArrayOf(
-        0x68, 0x17, 0x01,
-        0x01,               // ascOnOff = ON
-        0x00,               // ambientFlag = NC
-        0x02,               // wind = normal
-        0x00,               // focusOnVoice = off
-        0x14,               // level = 20
+        0x68, 0x19, 0x01,  // NCASM_SET_PARAM + XM6 sub-type + const
+        0x01,               // vcs = ON (value change signal)
+        0x01,               // totalEffect = ON (NC/ambient processing)
+        0x00,               // mode = NC (0 = NC, 1 = ambient)
+        0x00,               // ambientVoice = off
+        0x14,               // level = 20 (full)
+        0x00,               // noiseAdaptive = off
+        0x00,               // naSensitivity = 0
     )
 
+    /** Ambient sound ON, level 20 */
     val AMBIENT = byteArrayOf(
-        0x68, 0x17, 0x01,
-        0x01,               // ascOnOff = ON
-        0x01,               // ambientFlag = ambient
-        0x02,               // wind = normal
-        0x00,               // focusOnVoice = off
+        0x68, 0x19, 0x01,
+        0x01,               // vcs = ON
+        0x01,               // totalEffect = ON
+        0x01,               // mode = ambient
+        0x00,               // ambientVoice = off
         0x14,               // level = 20
+        0x00,               // noiseAdaptive = off
+        0x00,               // naSensitivity = 0
     )
 
-    // ---- XM6 alternative byte order (level at byte 6) ----
-    
-    val AMBIENT_XM6 = byteArrayOf(
-        0x68, 0x17, 0x01,
-        0x01,               // ascOnOff = ON
-        0x01,               // ambientFlag = ambient
-        0x02,               // wind = normal
-        0x14,               // level = 20
-        0x00,               // focusOnVoice = off
-    )
-
-    // ---- XM3/XM4 style (7 bytes, no wind/focus fields) ----
-    
-    val AMBIENT_7 = byteArrayOf(
-        0x68, 0x17, 0x01,
-        0x01,               // ascOnOff = ON
-        0x01,               // ambientFlag = ambient
-        0x14,               // level = 20
-    )
-
-    // ---- All variants for testing ----
-    val ALL_AMBIENT = listOf(
-        "XM5-8byte" to AMBIENT,
-        "XM6-swapped" to AMBIENT_XM6,
-        "XM4-7byte" to AMBIENT_7,
-    )
-
+    /** ANC/Ambient OFF */
     val ANC_OFF = byteArrayOf(
-        0x68, 0x17, 0x01,
-        0x00,               // ascOnOff = OFF
-        0x00,               // ambientFlag = N/A
-        0x02,               // wind = normal
-        0x00,               // focusOnVoice = off
+        0x68, 0x19, 0x01,
+        0x01,               // vcs = ON
+        0x00,               // totalEffect = OFF
+        0x00,               // mode = N/A
+        0x00,               // ambientVoice = off
         0x14,               // level = 20
+        0x00,               // noiseAdaptive = off
+        0x00,               // naSensitivity = 0
     )
 
     /**
