@@ -68,6 +68,6 @@ class MediaPlaybackMonitor(
         get() = audioManager.isMusicActive
 
     companion object {
-        private const val POLL_INTERVAL_MS = 1000L
+        private const val POLL_INTERVAL_MS = 500L
     }
 }
