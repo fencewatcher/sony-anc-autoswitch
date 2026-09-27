@@ -72,6 +72,23 @@ class BluetoothAncService : Service() {
                 ACTION_GET_STATUS -> {
                     broadcastStatus(status)
                 }
+
+                ACTION_ANC_ON -> {
+                    Log.d(tag, "Debug: manual ANC ON")
+                    isMediaPlaying = true
+                    scope.launch { sendAncCommandReliable(SonyAncProtocol.ANC_ON) }
+                }
+
+                ACTION_AMBIENT -> {
+                    Log.d(tag, "Debug: manual AMBIENT")
+                    isMediaPlaying = false
+                    scope.launch { sendAncCommandReliable(SonyAncProtocol.AMBIENT) }
+                }
+
+                ACTION_ANC_OFF -> {
+                    Log.d(tag, "Debug: manual ANC OFF")
+                    scope.launch { sendAncCommandReliable(SonyAncProtocol.ANC_OFF) }
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -460,12 +477,34 @@ class BluetoothAncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
+        val ancOnIntent = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_ANC_ON },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val ambientIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_AMBIENT },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val ancOffIntent = PendingIntent.getService(
+            this,
+            3,
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_ANC_OFF },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Sony ANC Auto-Switch")
             .setContentText(text)
-            .setSmallIcon(android.R.drawable.ic_media_play) // built-in icon
+            .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
             .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent)
+            .addAction(0, "🔇 NC", ancOnIntent)
+            .addAction(0, "🌬 Ambient", ambientIntent)
+            .addAction(0, "⛔ Off", ancOffIntent)
             .build()
     }
 
@@ -511,6 +550,9 @@ class BluetoothAncService : Service() {
         const val ACTION_START = "$PACKAGE.action.START"
         const val ACTION_STOP = "$PACKAGE.action.STOP"
         const val ACTION_GET_STATUS = "$PACKAGE.action.GET_STATUS"
+        const val ACTION_ANC_ON = "$PACKAGE.action.ANC_ON"
+        const val ACTION_AMBIENT = "$PACKAGE.action.AMBIENT"
+        const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
