@@ -73,9 +73,46 @@ class MediaPlaybackMonitor(
         val allowlist = allowlistProvider()
         if (allowlist.isEmpty()) return true  // no filtering
 
+        // Try to find the *currently playing* package via UID (most accurate)
+        val current = currentlyPlayingPackage()
+        if (current != null) {
+            Log.d(tag, "Active player UID → package: $current | allowlist: $allowlist")
+            return current in allowlist
+        }
+
+        // Fallback: notification-tracked packages
         val active = activeMediaPackages()
-        Log.d(tag, "Active media packages: $active | allowlist: $allowlist")
-        return active.any { it in allowlist }
+        Log.d(tag, "Active media packages (notif): $active | allowlist: $allowlist")
+
+        if (active.isEmpty()) return false
+        // Single tracked app — check it
+        if (active.size == 1) return active.first() in allowlist
+
+        // Multiple tracked and can't determine the active player:
+        // conservative — require ALL tracked apps to be in the allowlist
+        return active.all { it in allowlist }
+    }
+
+    /**
+     * Uses AudioManager.activePlaybackConfigurations + UID to find the
+     * app that is *actually producing audio right now* (not just having a
+     * lingering notification). This is the most accurate source.
+     */
+    private fun currentlyPlayingPackage(): String? {
+        try {
+            val configs = audioManager.activePlaybackConfigurations
+            for (cfg in configs) {
+                val usage = cfg.audioAttributes.usage
+                if (usage != android.media.AudioAttributes.USAGE_MEDIA) continue
+                val uid = playbackConfigUid(cfg)
+                if (uid > 0) {
+                    context.packageManager.getPackagesForUid(uid)?.firstOrNull()?.let { return it }
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(tag, "currentlyPlayingPackage failed: ${e.message}")
+        }
+        return null
     }
 
     /**
