@@ -311,25 +311,21 @@ class BluetoothAncService : Service() {
         Log.d(tag, "Media ${if (playing) "playing" else "paused"}")
         updateNotification(if (playing) "▶ Playing" else "⏸ Paused")
 
-        // Send command directly (coroutine-safe BT write)
+        // Wait a moment for headphone audio state to settle, then send
         scope.launch {
+            delay(600L)  // let headphones settle after play/pause transition
             val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
             sendAncCommandReliable(cmd)
         }
     }
 
     /**
-     * Sends the same ANC command with a retry to overcome headphone-side
-     * frame drops. Sony's protocol notes that commands can "lag a few
-     * seconds" and sometimes need a nudge.
-     *
-     * The retry uses the SAME seq bit so the second frame is either
-     * accepted (if the first was lost) or harmlessly ignored as a
-     * duplicate (if the first was received).
+     * Sends an ANC command with a retry, using [Thread.sleep] for
+     * deterministic inter-attempt delay.
      */
-    private suspend fun sendAncCommandReliable(payload: ByteArray) = withContext(Dispatchers.IO) {
+    private suspend fun sendAncCommandReliable(payload: ByteArray) {
         val seq = currentSeq
-        for (attempt in 0..1) {
+        for (attempt in 1..2) {
             if (btSocket == null) break
             val name = when {
                 payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
@@ -337,6 +333,22 @@ class BluetoothAncService : Service() {
                 payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
                 else -> "CUSTOM"
             }
+            try {
+                val frame = SonyAncProtocol.buildFrame(seq, payload)
+                btSocket?.outputStream?.write(frame)
+                btSocket?.outputStream?.flush()
+                Log.d(tag, "Sent $name seq=$seq (attempt $attempt)")
+            } catch (e: Exception) {
+                Log.w(tag, "$name attempt $attempt failed: ${e.message}")
+                btSocket = null
+                try { btSocket?.close() } catch (_: Exception) {}
+                triggerReconnect()
+                return
+            }
+            if (attempt == 1) Thread.sleep(400L)
+        }
+        currentSeq = seq xor 1
+    }
             try {
                 val frame = SonyAncProtocol.buildFrame(seq, payload)
                 btSocket?.outputStream?.write(frame)
