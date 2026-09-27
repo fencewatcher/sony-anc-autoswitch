@@ -306,6 +306,7 @@ class BluetoothAncService : Service() {
 
     companion object {
         const val TAG = "BTAncSvc"
+        const val PACKAGE = "com.fencewatcher.sonyanc"
 
         // Service UUID from Gadgetbridge reverse-engineering
         const val SERVICE_UUID = "956c7b26-d49a-4ba8-b03f-b17d393cb6e2"
@@ -330,6 +331,5 @@ class BluetoothAncService : Service() {
         // Reconnection
         private const val MAX_RETRIES = 20
         private const val RETRY_DELAY_MS = 3_000L
-        private const val PACKAGE = "com.fencewatcher.sonyanc"
     }
 }
