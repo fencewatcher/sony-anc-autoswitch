@@ -76,18 +76,18 @@ class BluetoothAncService : Service() {
                 ACTION_ANC_ON -> {
                     Log.d(tag, "Debug: manual ANC ON")
                     isMediaPlaying = true
-                    scope.launch { sendAncCommandReliable(SonyAncProtocol.ANC_ON) }
+                    scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_ON) }
                 }
 
                 ACTION_AMBIENT -> {
                     Log.d(tag, "Debug: manual AMBIENT")
                     isMediaPlaying = false
-                    scope.launch { sendAncCommandReliable(SonyAncProtocol.AMBIENT) }
+                    scope.launch { sendAncCommandOnce(SonyAncProtocol.AMBIENT) }
                 }
 
                 ACTION_ANC_OFF -> {
                     Log.d(tag, "Debug: manual ANC OFF")
-                    scope.launch { sendAncCommandReliable(SonyAncProtocol.ANC_OFF) }
+                    scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_OFF) }
                 }
             }
         } catch (e: Exception) {
@@ -205,19 +205,19 @@ class BluetoothAncService : Service() {
                     // XM6 protocol handshake — required before the headphones accept 0x19 commands
                     Log.d(tag, "Handshake: protocol info")
                     sendFrame(byteArrayOf(0x00, 0x00))
-                    Thread.sleep(100L)
+                    delay(100L)
                     Log.d(tag, "Handshake: support functions")
                     sendFrame(byteArrayOf(0x06, 0x00))
-                    Thread.sleep(100L)
+                    delay(100L)
                     Log.d(tag, "Handshake: battery")
                     sendFrame(byteArrayOf(0x22, 0x00))
-                    Thread.sleep(100L)
+                    delay(100L)
                     Log.d(tag, "Handshake: XM6 ANC inquiry (0x66 0x19)")
                     sendFrame(byteArrayOf(0x66, 0x19))
-                    Thread.sleep(100L)
+                    delay(100L)
                     Log.d(tag, "Handshake: EQ")
                     sendFrame(byteArrayOf(0x56, 0x00))
-                    Thread.sleep(200L)
+                    delay(200L)
 
                     Log.d(tag, "Handshake complete — sending active ANC command")
                     val initialCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
@@ -395,6 +395,22 @@ class BluetoothAncService : Service() {
             if (i < passes.size - 1) Thread.sleep(200L)
         }
         currentSeq = passes.last().xor(1)
+    }
+
+    /**
+     * Single send (no retries) for debug buttons — the payload format is correct now
+     * so a single frame is enough. Uses [sendFrame] to keep it simple.
+     */
+    private fun sendAncCommandOnce(payload: ByteArray) {
+        Log.d(tag, "Single: ${
+            when {
+                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
+                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
+                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
+                else -> "CUSTOM"
+            }
+        } — ${SonyAncProtocol.describePayload(payload)}")
+        sendFrame(payload)
     }
 
     /**
