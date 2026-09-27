@@ -371,7 +371,7 @@ class BluetoothAncService : Service() {
             }
             if (i < passes.size - 1) Thread.sleep(200L)
         }
-        currentSeq = firstSeq
+        currentSeq = passes.last().xor(1)
     }
 
     /**
