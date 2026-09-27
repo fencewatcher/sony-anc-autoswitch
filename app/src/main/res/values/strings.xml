@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Sony ANC Auto</string>
+    <string name="info_text">How it works:
+
+1. Pair your WH-1000XM6 (or XM5) with your phone
+2. Select it from the dropdown above
+3. Tap "Start Service"
+4. When you play media → ANC turns on
+5. When you pause → Ambient sound mode engages
+
+The service runs in the background until you stop it.
+
+Protocol: MDR framing over Bluetooth RFCOMM
+(service UUID 956c7b26-…)
+Originally reverse-engineered by Gadgetbridge.</string>
+</resources>
