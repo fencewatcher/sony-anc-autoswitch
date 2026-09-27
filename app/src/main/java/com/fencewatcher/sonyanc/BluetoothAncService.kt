@@ -151,7 +151,6 @@ class BluetoothAncService : Service() {
                     }
 
                     val device: BluetoothDevice = adapter.getRemoteDevice(address)
-                    val uuid = UUID.fromString(SERVICE_UUID)
 
                     // Close stale socket
                     try {
@@ -161,16 +160,17 @@ class BluetoothAncService : Service() {
 
                     Log.d(tag, "Connecting to ${device.name ?: "?"} ($address) via RFCOMM…")
                     status = Status.CONNECTING
-                    broadcastStatus(status)
+                    broadcastStatus(status, "Connecting…")
                     updateNotification("Connecting…")
 
-                    val socket = device.createRfcommSocketToServiceRecord(uuid)
+                    // Try multiple connection methods — Sony RFCOMM is finicky
+                    val socket = createSonyRfcommSocket(device)
                     btSocket = socket
                     socket.connect()
 
                     Log.d(tag, "Connected!")
                     status = Status.CONNECTED
-                    broadcastStatus(status)
+                    broadcastStatus(status, "Connected")
                     updateNotification("Connected ✓")
                     currentSeq = 0       // Reset seq on every fresh connection
                     retries = 0          // Reset retry counter on success
@@ -200,7 +200,7 @@ class BluetoothAncService : Service() {
                 } catch (e: Exception) {
                     Log.w(tag, "BT error: ${e.message}")
                     status = Status.DISCONNECTED
-                    broadcastStatus(status)
+                    broadcastStatus(status, e.message)
 
                     if (!isActive) break
 
@@ -217,9 +217,64 @@ class BluetoothAncService : Service() {
                 updateNotification("Stopped")
             } else {
                 status = Status.ERROR
-                broadcastStatus(status)
+                broadcastStatus(status, "All 20 connection retries failed")
                 updateNotification("Connection failed")
             }
+        }
+    }
+
+    // ---- Bluetooth connection helpers ----
+
+    /**
+     * Tries several RFCOMM socket-creation strategies.
+     * Sony's UUID is often missing from the device SDP record on Android,
+     * so we fall back to reflection-based channel 1.
+     */
+    private fun createSonyRfcommSocket(device: BluetoothDevice): BluetoothSocket {
+        val uuid = UUID.fromString(SERVICE_UUID)
+
+        // Strategy 1: standard UUID lookup (works on some phones)
+        try {
+            val s = device.createRfcommSocketToServiceRecord(uuid)
+            Log.d(tag, "Socket created via UUID")
+            return s
+        } catch (e: IOException) {
+            Log.w(tag, "UUID socket failed: ${e.message}")
+        }
+
+        // Strategy 2: insecure UUID variant (helps on some Samsung/OnePlus)
+        try {
+            val s = device.createInsecureRfcommSocketToServiceRecord(uuid)
+            Log.d(tag, "Socket created via insecure UUID")
+            return s
+        } catch (e: IOException) {
+            Log.w(tag, "Insecure UUID socket failed: ${e.message}")
+        }
+
+        // Strategy 3: reflection — createRfcommSocket(channel) with channel 1
+        // This is the Sony-recommended fallback used by Gadgetbridge
+        try {
+            val method = device.javaClass.getMethod(
+                "createRfcommSocket", Int::class.java
+            )
+            val s = method.invoke(device, 1) as BluetoothSocket
+            Log.d(tag, "Socket created via reflection (channel 1)")
+            return s
+        } catch (e: Exception) {
+            Log.w(tag, "Reflection socket failed: ${e.message}")
+        }
+
+        // Strategy 4: try reflection with channel 10 (some devices use this)
+        try {
+            val method = device.javaClass.getMethod(
+                "createRfcommSocket", Int::class.java
+            )
+            val s = method.invoke(device, 10) as BluetoothSocket
+            Log.d(tag, "Socket created via reflection (channel 10)")
+            return s
+        } catch (e: Exception) {
+            Log.w(tag, "Reflection channel-10 failed: ${e.message}")
+            throw IOException("All RFCOMM socket strategies failed")
         }
     }
 
@@ -310,11 +365,12 @@ class BluetoothAncService : Service() {
     var status: Status = Status.DISCONNECTED
         private set
 
-    private fun broadcastStatus(s: Status) {
+    private fun broadcastStatus(s: Status, message: String? = null) {
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, s.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
-            `package` = packageName // explicit app-local broadcast
+            if (message != null) putExtra(EXTRA_MESSAGE, message)
+            `package` = packageName
         }
         try {
             sendBroadcast(intent)
@@ -339,6 +395,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_ADDRESS = "device_address"
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
+        const val EXTRA_MESSAGE = "message"
 
         // Status broadcast
         const val STATUS_BROADCAST = "$PACKAGE.STATUS"

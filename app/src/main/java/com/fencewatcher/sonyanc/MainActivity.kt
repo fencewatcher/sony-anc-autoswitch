@@ -18,6 +18,7 @@ import androidx.core.content.ContextCompat
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.STATUS_BROADCAST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_START
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_STOP
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
@@ -68,7 +69,8 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val status = intent?.getStringExtra(EXTRA_STATUS)
             if (status != null) {
-                updateStatusDisplay(BluetoothAncService.Status.valueOf(status))
+                val msg = intent.getStringExtra(EXTRA_MESSAGE)
+                updateStatusDisplay(BluetoothAncService.Status.valueOf(status), msg)
             }
         }
     }
@@ -249,14 +251,18 @@ class MainActivity : AppCompatActivity() {
         binding.btnRefresh.isEnabled = !running
     }
 
-    private fun updateStatusDisplay(status: BluetoothAncService.Status) {
+    private fun updateStatusDisplay(status: BluetoothAncService.Status, message: String? = null) {
         val icon = when (status) {
             BluetoothAncService.Status.DISCONNECTED -> "⚪"
             BluetoothAncService.Status.CONNECTING -> "🔄"
             BluetoothAncService.Status.CONNECTED -> "🟢"
             BluetoothAncService.Status.ERROR -> "🔴"
         }
-        binding.textStatus.text = "$icon $status"
+        binding.textStatus.text = if (message != null) {
+            "$icon $status — $message"
+        } else {
+            "$icon $status"
+        }
     }
 
     private fun getServiceStatus() {
