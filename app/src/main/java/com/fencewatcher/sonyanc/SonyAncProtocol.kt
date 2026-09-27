@@ -45,6 +45,16 @@ object SonyAncProtocol {
         0x14,               // level = 20
     )
 
+    /** Ambient sound ON, level 20 — alternate byte order for XM6 */
+    val AMBIENT_XM6 = byteArrayOf(
+        0x68, 0x17, 0x01,
+        0x01,               // ascOnOff = ON
+        0x01,               // ambientFlag = ambient
+        0x02,               // wind = normal
+        0x14,               // level = 20 (XM6: level before focusOnVoice)
+        0x00,               // focusOnVoice = off
+    )
+
     /** ANC/Ambient OFF — keep ambient level at 20 */
     val ANC_OFF = byteArrayOf(
         0x68, 0x17, 0x01,

@@ -33,6 +33,7 @@ class BluetoothAncService : Service() {
     private val tag = "BTAncSvc"
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var connectionJob: Job? = null
+    private var refreshJob: Job? = null
     private var btSocket: BluetoothSocket? = null
     private var mediaMonitor: MediaPlaybackMonitor? = null
     private var currentSeq = 0
@@ -184,6 +185,17 @@ class BluetoothAncService : Service() {
                     currentSeq = 0       // Reset seq on every fresh connection
                     retries = 0          // Reset retry counter on success
 
+                    // Start periodic ANC state refresh (every 15s)
+                    refreshJob?.cancel()
+                    refreshJob = scope.launch {
+                        while (isActive && btSocket != null) {
+                            delay(15_000L)
+                            if (!isActive || btSocket == null) break
+                            val currentCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_XM6
+                            sendAncCommandReliable(currentCmd)
+                        }
+                    }
+
                     // If media is already playing, send ANC now
                     if (isMediaPlaying) {
                         sendAncCommand(SonyAncProtocol.ANC_ON)
@@ -314,7 +326,7 @@ class BluetoothAncService : Service() {
         // Wait a moment for headphone audio state to settle, then send
         scope.launch {
             delay(300L)  // brief settle, then send immediately
-            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
+            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_XM6
             sendAncCommandReliable(cmd)
         }
     }
@@ -337,26 +349,28 @@ class BluetoothAncService : Service() {
         val name = when {
             payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
             payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
+            payload.contentEquals(SonyAncProtocol.AMBIENT_XM6) -> "AMBIENT_XM6"
             payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
             else -> "CUSTOM"
         }
-        for ((i, seq) in listOf(firstSeq, firstSeq xor 1).withIndex()) {
+        // Send 5 rapid bursts with alternating seq so every frame is new
+        val passes = listOf(firstSeq, firstSeq xor 1, firstSeq, firstSeq xor 1, firstSeq)
+        for ((i, seq) in passes.withIndex()) {
             if (btSocket == null) break
             try {
                 val frame = SonyAncProtocol.buildFrame(seq, payload)
                 btSocket?.outputStream?.write(frame)
                 btSocket?.outputStream?.flush()
-                Log.d(tag, "Sent $name seq=$seq (pass ${i + 1})")
+                Log.d(tag, "Sent $name seq=$seq (burst ${i + 1})")
             } catch (e: Exception) {
-                Log.w(tag, "$name pass ${i + 1} failed: ${e.message}")
+                Log.w(tag, "$name burst ${i + 1} failed: ${e.message}")
                 btSocket = null
                 try { btSocket?.close() } catch (_: Exception) {}
                 triggerReconnect()
                 return
             }
-            if (i == 0) Thread.sleep(400L)
+            if (i < passes.size - 1) Thread.sleep(200L)
         }
-        // Restore so next command alternates from last seq headphones saw (firstSeq xor 1)
         currentSeq = firstSeq
     }
 
