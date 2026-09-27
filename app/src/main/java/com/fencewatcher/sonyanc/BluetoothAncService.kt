@@ -185,21 +185,26 @@ class BluetoothAncService : Service() {
                     currentSeq = 0       // Reset seq on every fresh connection
                     retries = 0          // Reset retry counter on success
 
-                    // Start periodic ANC state refresh (every 15s)
-                    refreshJob?.cancel()
-                    refreshJob = scope.launch {
-                        while (isActive && btSocket != null) {
-                            delay(15_000L)
-                            if (!isActive || btSocket == null) break
-                            val currentCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
-                            sendAncCommandReliable(currentCmd)
-                        }
-                    }
+                    // XM6 protocol handshake — required before the headphones accept 0x19 commands
+                    Log.d(tag, "Handshake: protocol info")
+                    sendFrame(byteArrayOf(0x00, 0x00))
+                    Thread.sleep(100L)
+                    Log.d(tag, "Handshake: support functions")
+                    sendFrame(byteArrayOf(0x06, 0x00))
+                    Thread.sleep(100L)
+                    Log.d(tag, "Handshake: battery")
+                    sendFrame(byteArrayOf(0x22, 0x00))
+                    Thread.sleep(100L)
+                    Log.d(tag, "Handshake: XM6 ANC inquiry (0x66 0x19)")
+                    sendFrame(byteArrayOf(0x66, 0x19))
+                    Thread.sleep(100L)
+                    Log.d(tag, "Handshake: EQ")
+                    sendFrame(byteArrayOf(0x56, 0x00))
+                    Thread.sleep(200L)
 
-                    // If media is already playing, send ANC now
-                    if (isMediaPlaying) {
-                        sendAncCommand(SonyAncProtocol.ANC_ON)
-                    }
+                    Log.d(tag, "Handshake complete — sending active ANC command")
+                    val initialCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
+                    sendAncCommandReliable(initialCmd)
 
                     // Blocking read loop — any data or -1 / IOException = disconnected
                     val inputStream = socket.inputStream
@@ -371,6 +376,26 @@ class BluetoothAncService : Service() {
             if (i < passes.size - 1) Thread.sleep(200L)
         }
         currentSeq = passes.last().xor(1)
+    }
+
+    /**
+     * Send arbitrary payload bytes wrapped in an MDR frame, used for
+     * protocol handshake commands.
+     */
+    private fun sendFrame(payload: ByteArray) {
+        val socket = btSocket ?: return
+        try {
+            val frame = SonyAncProtocol.buildFrame(currentSeq, payload)
+            socket.outputStream.write(frame)
+            socket.outputStream.flush()
+            Log.d(tag, "Frame ${payload.joinToString(" ") { "%02x".format(it) }} seq=$currentSeq")
+            currentSeq = currentSeq xor 1
+        } catch (e: Exception) {
+            Log.w(tag, "Frame send failed: ${e.message}")
+            btSocket = null
+            try { socket.close() } catch (_: Exception) {}
+            triggerReconnect()
+        }
     }
 
     /**
