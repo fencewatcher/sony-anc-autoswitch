@@ -47,32 +47,51 @@ class BluetoothAncService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START -> {
-                val address = intent.getStringExtra(EXTRA_ADDRESS)
-                    ?: run {
-                        Log.w(tag, "START without device address, ignoring")
-                        stopSelf()
-                        return START_NOT_STICKY
-                    }
-                deviceAddress = address
-                Log.d(tag, "Starting service, device=$address")
-                startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
-                serviceInit(address)
-            }
+        try {
+            when (intent?.action) {
+                ACTION_START -> {
+                    val address = intent.getStringExtra(EXTRA_ADDRESS)
+                        ?: run {
+                            Log.w(tag, "START without device address, ignoring")
+                            stopSelf()
+                            return START_NOT_STICKY
+                        }
+                    deviceAddress = address
+                    Log.d(tag, "Starting service, device=$address")
+                    safeStartForeground()
+                    serviceInit(address)
+                }
 
-            ACTION_STOP -> {
-                Log.d(tag, "Stopping service")
-                stopSelf()
-            }
+                ACTION_STOP -> {
+                    Log.d(tag, "Stopping service")
+                    stopSelf()
+                }
 
-            ACTION_GET_STATUS -> {
-                // Responded via broadcast; just a trigger
-                broadcastStatus(status)
+                ACTION_GET_STATUS -> {
+                    broadcastStatus(status)
+                }
             }
+        } catch (e: Exception) {
+            Log.e(tag, "Unhandled in onStartCommand", e)
+            broadcastStatus(Status.ERROR)
+            stopSelf()
         }
-        // Don't restart if killed; the user can restart via the UI
         return START_NOT_STICKY
+    }
+
+    /**
+     * Wraps [startForeground] in a try-catch to survive denied notification
+     * permission (Android 13+) or other transient failures.
+     */
+    private fun safeStartForeground() {
+        try {
+            startForeground(NOTIFICATION_ID, buildNotification("Starting…"))
+        } catch (e: SecurityException) {
+            Log.e(tag, "startForeground denied — missing POST_NOTIFICATIONS?", e)
+            // Fall back to sticky background service (no visible notification)
+        } catch (e: Exception) {
+            Log.e(tag, "startForeground failed", e)
+        }
     }
 
     override fun onDestroy() {

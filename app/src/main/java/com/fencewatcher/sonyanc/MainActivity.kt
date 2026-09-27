@@ -198,6 +198,17 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        // On Android 13+, POST_NOTIFICATIONS is required for foreground service.
+        // If denied, startForeground() crashes the service.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED
+            ) {
+                permissionLauncher.launch(requiredPermissions)
+                return
+            }
+        }
+
         val device = pairedDevices[pos]
         val intent = Intent(this, BluetoothAncService::class.java).apply {
             action = ACTION_START
