@@ -30,14 +30,14 @@ object SonyAncProtocol {
         0x00,               // naSensitivity = 0
     )
 
-    /** Builds an ambient-mode payload with configurable level (1-20) and voice passthrough. */
-    fun ambient(level: Int, voice: Boolean): ByteArray = byteArrayOf(
+    /** Builds an ambient-mode payload with configurable level (1-20), voice passthrough, and noise-adaptive (auto ambient). */
+    fun ambient(level: Int, voice: Boolean, noiseAdaptive: Boolean = false): ByteArray = byteArrayOf(
         0x68, 0x19, 0x01,
         0x01,                        // enable = ON
         0x01,                        // mode = ambient
         if (voice) 0x01 else 0x00,   // ambientVoice
         level.coerceIn(1, 20).toByte(),
-        0x00,                        // noiseAdaptive = off
+        if (noiseAdaptive) 0x01 else 0x00, // noiseAdaptive (auto ambient)
         0x00,                        // naSensitivity = 0
     )
 

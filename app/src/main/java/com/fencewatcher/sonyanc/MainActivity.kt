@@ -6,11 +6,9 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,12 +19,15 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.STATUS_BROADCAST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_START
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_STOP
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.PREFS_NAME
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.KEY_AMBIENT_LEVEL
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.KEY_VOICE_PASSTHROUGH
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.KEY_AMBIENT_NOISE_ADAPTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.KEY_ALLOWLIST_ENABLED
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.KEY_ALLOWLIST
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
@@ -35,17 +36,17 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
 
-    // List of (name, address) from paired Sony XM devices
     private data class DeviceInfo(val name: String, val address: String) {
         override fun toString() = name
     }
 
     private val pairedDevices = mutableListOf<DeviceInfo>()
-
-    // Service running state
     private var serviceRunning = false
 
-    // Permissions needed
+    // Extras from the service
+    private var battery: Int? = null
+    private var currentMode = "—"
+
     private val requiredPermissions = mutableListOf<String>().apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             add(Manifest.permission.BLUETOOTH_CONNECT)
@@ -58,30 +59,33 @@ class MainActivity : AppCompatActivity() {
         }
     }.toTypedArray()
 
-    // ---- Permission launcher ----
-
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { _ ->
-        if (hasAllPermissions()) {
-            scanDevices()
-        } else {
-            Toast.makeText(this, "Bluetooth permissions required", Toast.LENGTH_LONG).show()
-        }
+        if (hasAllPermissions()) scanDevices()
+        else Toast.makeText(this, "Bluetooth permissions required", Toast.LENGTH_LONG).show()
     }
 
-    // ---- Status receiver ----
+    // ---- Status receiver (updates the headphone card) ----
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             val status = intent?.getStringExtra(EXTRA_STATUS)
             if (status != null) {
-                val msg = intent.getStringExtra(EXTRA_MESSAGE)
                 val s = BluetoothAncService.Status.valueOf(status)
+                val msg = intent.getStringExtra(EXTRA_MESSAGE)
                 updateStatusDisplay(s, msg)
-                // Sync the toggle button with real service state
                 updateServiceRunning(s == BluetoothAncService.Status.CONNECTING ||
                     s == BluetoothAncService.Status.CONNECTED)
+
+                // Update battery + mode from extras
+                if (intent.hasExtra(EXTRA_BATTERY)) {
+                    battery = intent.getIntExtra(EXTRA_BATTERY, 0)
+                }
+                if (intent.hasExtra(EXTRA_MODE)) {
+                    currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
+                }
+                updateCardStats()
             }
         }
     }
@@ -93,7 +97,6 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
-        // Register status broadcast receiver
         registerReceiver(statusReceiver, IntentFilter(STATUS_BROADCAST),
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
                 Context.RECEIVER_NOT_EXPORTED else 0
@@ -104,13 +107,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnChooseApps.setOnClickListener { showAppPicker() }
         binding.btnNotifAccess.setOnClickListener { openNotifAccessSettings() }
 
-        // Settings listeners
+        // SeekBar
         binding.seekLevel.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seek: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
                 binding.textLevelValue.text = (v + 1).toString()
-                if (fromUser) {
-                    prefs().edit().putInt(KEY_AMBIENT_LEVEL, v + 1).apply()
-                }
+                if (fromUser) prefs().edit().putInt(KEY_AMBIENT_LEVEL, v + 1).apply()
             }
             override fun onStartTrackingTouch(seek: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(seek: android.widget.SeekBar?) {}
@@ -120,27 +121,26 @@ class MainActivity : AppCompatActivity() {
             prefs().edit().putBoolean(KEY_VOICE_PASSTHROUGH, checked).apply()
         }
 
+        binding.switchAutoAmbient.setOnCheckedChangeListener { _, checked ->
+            prefs().edit().putBoolean(KEY_AMBIENT_NOISE_ADAPTIVE, checked).apply()
+        }
+
         binding.switchAllowlist.setOnCheckedChangeListener { _, checked ->
             prefs().edit().putBoolean(KEY_ALLOWLIST_ENABLED, checked).apply()
             updateSelectedAppsText()
         }
 
-        // Set build version
         binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
 
-        // Initial state: real running state from the service object
-        val running = BluetoothAncService.isRunning
-        updateServiceRunning(running)
-
-        // Check permissions and scan
-        if (hasAllPermissions()) {
-            scanDevices()
-        } else {
-            permissionLauncher.launch(requiredPermissions)
-        }
-
+        // Sync with service state
+        updateServiceRunning(BluetoothAncService.isRunning)
         loadSettings()
         updateSelectedAppsText()
+        updateCardStats()
+
+        // Start with scan
+        if (hasAllPermissions()) scanDevices()
+        else permissionLauncher.launch(requiredPermissions)
     }
 
     override fun onDestroy() {
@@ -157,6 +157,7 @@ class MainActivity : AppCompatActivity() {
         binding.seekLevel.progress = level - 1
         binding.textLevelValue.text = level.toString()
         binding.switchVoice.isChecked = prefs().getBoolean(KEY_VOICE_PASSTHROUGH, false)
+        binding.switchAutoAmbient.isChecked = prefs().getBoolean(KEY_AMBIENT_NOISE_ADAPTIVE, false)
         binding.switchAllowlist.isChecked = prefs().getBoolean(KEY_ALLOWLIST_ENABLED, false)
     }
 
@@ -166,16 +167,14 @@ class MainActivity : AppCompatActivity() {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
         val resolved = pm.queryIntentActivities(intent, 0)
         val seen = HashSet<String>()
-        return resolved
-            .mapNotNull { info ->
-                val pkg = info.activityInfo.packageName
-                if (!seen.add(pkg)) return@mapNotNull null
-                val label = try {
-                    pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
-                } catch (_: Exception) { pkg }
-                label to pkg
-            }
-            .sortedBy { it.first.lowercase() }
+        return resolved.mapNotNull { info ->
+            val pkg = info.activityInfo.packageName
+            if (!seen.add(pkg)) return@mapNotNull null
+            val label = try {
+                pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+            } catch (_: Exception) { pkg }
+            label to pkg
+        }.sortedBy { it.first.lowercase() }
     }
 
     private fun showAppPicker() {
@@ -203,8 +202,8 @@ class MainActivity : AppCompatActivity() {
         val enabled = prefs().getBoolean(KEY_ALLOWLIST_ENABLED, false)
         binding.textSelectedApps.text = when {
             !enabled -> "Filtering disabled — any app triggers"
-            selected.isEmpty() -> "No apps selected — nothing triggers (turn filter off to allow all)"
-            else -> "Triggering apps:\n" + selected.joinToString("\n")
+            selected.isEmpty() -> "No apps selected — nothing triggers"
+            else -> selected.joinToString("\n")
         }
     }
 
@@ -227,26 +226,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun scanDevices() {
         pairedDevices.clear()
-
         val adapter = BluetoothAdapter.getDefaultAdapter()
-        if (adapter == null) {
-            binding.textStatus.text = "❌ No Bluetooth hardware"
+        if (adapter == null || !adapter.isEnabled) {
+            updateCardStatus("⚠️ Bluetooth off", false)
             return
         }
-        if (!adapter.isEnabled) {
-            binding.textStatus.text = "⚠️ Turn on Bluetooth"
-            return
-        }
-
         val btPermitted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) ==
-                    PackageManager.PERMISSION_GRANTED
+                PackageManager.PERMISSION_GRANTED
         } else true
-
-        if (!btPermitted) {
-            binding.textStatus.text = "⚠️ Bluetooth permission needed"
-            return
-        }
+        if (!btPermitted) { updateCardStatus("⚠️ Permission needed", false); return }
 
         val bonded = adapter.bondedDevices ?: emptySet()
         for (device in bonded) {
@@ -257,18 +246,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (pairedDevices.isEmpty()) {
-            binding.textStatus.text = "🔍 No WH-1000XM devices paired"
-            binding.textDeviceList.text = "Pair your headphones in Settings → Bluetooth"
+            binding.textModel.text = "No headphones"
+            updateCardStatus("🔍 Pair your XM6 in Settings", false)
             binding.btnToggle.isEnabled = false
         } else {
-            binding.textStatus.text = "${pairedDevices.size} device(s) found"
-            binding.textDeviceList.text = pairedDevices.joinToString("\n") { d ->
-                "• ${d.name}  (${d.address})"
-            }
+            val first = pairedDevices.first()
+            binding.textModel.text = first.name
+            updateCardStatus("${pairedDevices.size} device(s) found", false)
             binding.btnToggle.isEnabled = true
         }
 
-        // Populate dropdown
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerDevice.adapter = listAdapter
@@ -277,18 +264,17 @@ class MainActivity : AppCompatActivity() {
     // ---- Toggle ----
 
     private fun onToggleClicked() {
-        if (serviceRunning) {
-            stopService()
-        } else {
-            startService()
-        }
+        if (serviceRunning) stopService()
+        else startService()
     }
 
     private fun onRefreshClicked() {
-        if (hasAllPermissions()) {
-            scanDevices()
-        } else {
-            permissionLauncher.launch(requiredPermissions)
+        if (!hasAllPermissions()) { permissionLauncher.launch(requiredPermissions); return }
+        scanDevices()
+        updateServiceRunning(BluetoothAncService.isRunning)
+        if (BluetoothAncService.isRunning) {
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_GET_STATUS }
+                .also { startService(it) }
         }
     }
 
@@ -298,50 +284,32 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "Select a device first", Toast.LENGTH_SHORT).show()
             return
         }
-
-        // Check BT permissions again (user might have revoked them)
-        if (!hasAllPermissions()) {
-            permissionLauncher.launch(requiredPermissions)
-            return
-        }
-
-        // On Android 13+, POST_NOTIFICATIONS is required for foreground service.
-        // If denied, startForeground() crashes the service.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                permissionLauncher.launch(requiredPermissions)
-                return
-            }
-        }
+        if (!hasAllPermissions()) { permissionLauncher.launch(requiredPermissions); return }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) { permissionLauncher.launch(requiredPermissions); return }
 
         val device = pairedDevices[pos]
-        val intent = Intent(this, BluetoothAncService::class.java).apply {
+        Intent(this, BluetoothAncService::class.java).apply {
             action = ACTION_START
             putExtra(EXTRA_ADDRESS, device.address)
+        }.also {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it)
+            else startService(it)
         }
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent)
-        } else {
-            startService(intent)
-        }
-
         updateServiceRunning(true)
-        binding.textStatus.text = "🔄 Starting…"
+        updateCardStatus("🔄 Starting…", false)
     }
 
     private fun stopService() {
-        val intent = Intent(this, BluetoothAncService::class.java).apply {
-            action = ACTION_STOP
-        }
-        startService(intent)
+        Intent(this, BluetoothAncService::class.java).apply { action = ACTION_STOP }
+            .also { startService(it) }
         updateServiceRunning(false)
-        binding.textStatus.text = "⏹ Stopped"
+        updateCardStatus("⏹ Stopped", false)
     }
 
-    // ---- Status display ----
+    // ---- Status display (updates the headphone card) ----
 
     private fun updateServiceRunning(running: Boolean) {
         serviceRunning = running
@@ -363,10 +331,18 @@ class MainActivity : AppCompatActivity() {
             BluetoothAncService.Status.CONNECTED -> "🟢"
             BluetoothAncService.Status.ERROR -> "🔴"
         }
-        binding.textStatus.text = if (message != null) {
-            "$icon $status — $message"
-        } else {
-            "$icon $status"
-        }
+        updateCardStatus(if (message != null) "$icon $status — $message" else "$icon $status", true)
+    }
+
+    /** Updates the status line in the headphone card. */
+    private fun updateCardStatus(text: String, includeMode: Boolean) {
+        binding.textStatus.text = text
+    }
+
+    /** Updates battery + mode display in the card. */
+    private fun updateCardStats() {
+        val b = battery?.let { "🔋$it%" } ?: "🔋—"
+        binding.textBattery.text = b
+        binding.textMode.text = "🎧 $currentMode"
     }
 }

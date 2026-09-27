@@ -19,85 +19,117 @@
             android:textSize="22sp"
             android:textStyle="bold"
             android:textColor="@color/on_surface"
-            android:layout_marginBottom="8dp" />
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Automatically switches ANC mode when media plays/pauses"
-            android:textSize="13sp"
-            android:textColor="#FF888888"
-            android:layout_marginBottom="24dp" />
-
-        <!-- Device selection -->
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Paired WH-1000XM devices:"
-            android:textSize="14sp"
-            android:textColor="@color/on_surface"
             android:layout_marginBottom="4dp" />
 
-        <Spinner
-            android:id="@+id/spinnerDevice"
-            android:layout_width="match_parent"
-            android:layout_height="48dp"
-            android:background="@color/surface"
-            android:textColor="@color/on_surface"
-            android:layout_marginBottom="16dp" />
-
-        <!-- Device list (text fallback for visibility) -->
         <TextView
-            android:id="@+id/textDeviceList"
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:text="v1.2"
             android:textSize="12sp"
-            android:textColor="#FFAAAAAA"
-            android:layout_marginBottom="16dp" />
+            android:textColor="#FF888888"
+            android:layout_marginBottom="20dp" />
 
-        <!-- Action buttons -->
-        <LinearLayout
+        <!-- ===== Headphone Info Card ===== -->
+        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="16dp"
+            app:cardElevation="4dp"
             android:layout_marginBottom="16dp">
 
-            <Button
-                android:id="@+id/btnToggle"
-                android:layout_width="0dp"
-                android:layout_height="56dp"
-                android:layout_weight="1"
-                android:text="Start Service"
-                android:textColor="@android:color/white"
-                android:textSize="16sp"
-                android:enabled="false"
-                android:layout_marginEnd="8dp" />
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="16dp">
 
-            <Button
-                android:id="@+id/btnRefresh"
-                android:layout_width="56dp"
-                android:layout_height="56dp"
-                android:text="↻"
-                android:textSize="20sp"
-                android:textColor="@android:color/white"
-                android:backgroundTint="#FF555555" />
-        </LinearLayout>
+                <!-- Headphone icon -->
+                <ImageView
+                    android:layout_width="72dp"
+                    android:layout_height="72dp"
+                    android:src="@drawable/ic_headphones_big"
+                    android:layout_gravity="center_vertical"
+                    android:contentDescription="Headphones" />
 
-        <!-- Status -->
-        <TextView
+                <!-- Info column -->
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginStart="16dp"
+                    android:layout_gravity="center_vertical">
+
+                    <!-- Model name -->
+                    <TextView
+                        android:id="@+id/textModel"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="18sp"
+                        android:textStyle="bold"
+                        android:textColor="@color/on_surface"
+                        android:text="WH-1000XM6" />
+
+                    <!-- Status -->
+                    <TextView
+                        android:id="@+id/textStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textSize="13sp"
+                        android:textColor="#FFAAAAAA"
+                        android:text="—"
+                        android:paddingTop="2dp" />
+
+                    <!-- Battery + Mode row -->
+                    <LinearLayout
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:paddingTop="6dp"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/textBattery"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="#FFAAAAAA"
+                            android:text="🔋 —" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="#FF666666"
+                            android:text=" | "
+                            android:paddingHorizontal="8dp" />
+
+                        <TextView
+                            android:id="@+id/textMode"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textSize="14sp"
+                            android:textColor="#FFAAAAAA"
+                            android:text="🎧 —" />
+                    </LinearLayout>
+
+                </LinearLayout>
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <!-- ===== Main Toggle Button ===== -->
+        <Button
+            android:id="@+id/btnToggle"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="—"
-            android:id="@+id/textStatus"
+            android:layout_height="56dp"
+            android:text="Start Service"
+            android:textColor="@android:color/white"
             android:textSize="16sp"
-            android:textColor="@color/on_surface"
-            android:padding="12dp"
-            android:background="@color/surface"
-            android:gravity="center"
+            android:enabled="false"
             android:layout_marginBottom="16dp" />
 
-        <!-- Settings card -->
+        <!-- ===== Settings ===== -->
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -106,7 +138,44 @@
             android:textColor="#FFBBBBBB"
             android:textSize="13sp"
             android:lineSpacingExtra="2dp"
+            android:layout_marginBottom="12dp"
             android:text="@string/settings_text" />
+
+        <!-- Device row (compact) -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingVertical="6dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Device:"
+                android:textSize="14sp"
+                android:textColor="@color/on_surface"
+                android:layout_marginEnd="12dp" />
+
+            <Spinner
+                android:id="@+id/spinnerDevice"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="40dp"
+                android:background="@color/surface"
+                android:textColor="@color/on_surface" />
+
+            <Button
+                android:id="@+id/btnRefresh"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:text="↻"
+                android:textSize="18sp"
+                android:textColor="@android:color/white"
+                android:backgroundTint="#FF555555"
+                android:padding="0dp"
+                android:layout_marginStart="8dp" />
+        </LinearLayout>
 
         <!-- Ambient level -->
         <TextView
@@ -115,15 +184,13 @@
             android:text="Ambient level:"
             android:textSize="14sp"
             android:textColor="@color/on_surface"
-            android:paddingTop="16dp"
-            android:layout_marginBottom="4dp" />
+            android:paddingTop="12dp" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:layout_marginBottom="4dp">
+            android:gravity="center_vertical">
 
             <TextView
                 android:id="@+id/textLevelValue"
@@ -150,7 +217,16 @@
             android:layout_height="wrap_content"
             android:text="Focus on voice (voice passthrough)"
             android:textColor="@color/on_surface"
-            android:layout_marginTop="8dp" />
+            android:paddingVertical="4dp" />
+
+        <!-- Auto ambient (NEW) -->
+        <Switch
+            android:id="@+id/switchAutoAmbient"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Auto ambient (noise adaptive)"
+            android:textColor="@color/on_surface"
+            android:paddingVertical="4dp" />
 
         <!-- App allowlist -->
         <TextView
@@ -159,8 +235,7 @@
             android:text="Trigger apps:"
             android:textSize="14sp"
             android:textColor="@color/on_surface"
-            android:paddingTop="16dp"
-            android:layout_marginBottom="4dp" />
+            android:paddingTop="12dp" />
 
         <Switch
             android:id="@+id/switchAllowlist"
@@ -172,7 +247,7 @@
         <Button
             android:id="@+id/btnChooseApps"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:text="Choose apps…"
             android:textColor="@android:color/white"
             android:backgroundTint="#FF445577"
@@ -184,17 +259,17 @@
             android:layout_height="wrap_content"
             android:textSize="12sp"
             android:textColor="#FFAAAAAA"
-            android:layout_marginTop="4dp"
-            android:layout_marginBottom="8dp" />
+            android:text=""
+            android:layout_marginVertical="4dp" />
 
         <Button
             android:id="@+id/btnNotifAccess"
             android:layout_width="match_parent"
-            android:layout_height="48dp"
+            android:layout_height="44dp"
             android:text="Enable app detection (notification access)"
             android:textColor="@android:color/white"
             android:backgroundTint="#FF774444"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="4dp" />
 
         <!-- Info card -->
         <TextView
@@ -214,7 +289,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center"
-            android:paddingTop="16dp"
+            android:paddingTop="12dp"
             android:paddingBottom="8dp"
             android:textSize="11sp"
             android:textColor="#FF666666"

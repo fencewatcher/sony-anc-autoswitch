@@ -149,8 +149,14 @@ class BluetoothAncService : Service() {
     private fun allowlist(): Set<String> =
         prefs().getStringSet(KEY_ALLOWLIST, emptySet()) ?: emptySet()
 
-    private fun sonyAmbientCommand(): ByteArray =
-        SonyAncProtocol.ambient(ambientLevel(), voicePassthrough())
+    private fun sonyAmbientCommand(): ByteArray {
+        val p = prefs()
+        return SonyAncProtocol.ambient(
+            level = p.getInt(KEY_AMBIENT_LEVEL, 20),
+            voice = p.getBoolean(KEY_VOICE_PASSTHROUGH, false),
+            noiseAdaptive = p.getBoolean(KEY_AMBIENT_NOISE_ADAPTIVE, false),
+        )
+    }
 
     // ---- Initialisation ----
 
@@ -661,6 +667,7 @@ class BluetoothAncService : Service() {
             Status.ERROR -> "Error"
         }
         updateNotification(base)
+        broadcastStats()
     }
 
     // ---- Status broadcasting ----
@@ -676,11 +683,25 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_STATUS, s.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (message != null) putExtra(EXTRA_MESSAGE, message)
+            if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
+            putExtra(EXTRA_MODE, currentModeName)
             `package` = packageName
         }
         try {
             sendBroadcast(intent)
         } catch (_: Exception) {}
+    }
+
+    /** Broadcast current stats (battery/mode) without changing status. */
+    private fun broadcastStats() {
+        val intent = Intent(STATUS_BROADCAST).apply {
+            putExtra(EXTRA_STATUS, status.name)
+            putExtra(EXTRA_DEVICE, deviceAddress)
+            if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
+            putExtra(EXTRA_MODE, currentModeName)
+            `package` = packageName
+        }
+        try { sendBroadcast(intent) } catch (_: Exception) {}
     }
 
     // ---- Companion / constants ----
@@ -721,8 +742,13 @@ class BluetoothAncService : Service() {
         const val PREFS_NAME = "anc_settings"
         const val KEY_AMBIENT_LEVEL = "ambient_level"
         const val KEY_VOICE_PASSTHROUGH = "voice_passthrough"
+        const val KEY_AMBIENT_NOISE_ADAPTIVE = "ambient_noise_adaptive"
         const val KEY_ALLOWLIST_ENABLED = "allowlist_enabled"
         const val KEY_ALLOWLIST = "allowlist_apps"
+
+        // Broadcast extras
+        const val EXTRA_BATTERY = "battery"
+        const val EXTRA_MODE = "mode"
 
         // Reconnection
         private const val MAX_RETRIES = 20
