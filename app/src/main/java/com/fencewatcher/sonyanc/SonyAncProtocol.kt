@@ -5,17 +5,15 @@ import java.io.ByteArrayOutputStream
 /**
  * Sony WH-1000XM6 Bluetooth control protocol (MDR-v2 framing).
  *
- * **XM6 uses sub-type 0x19** (not 0x17 as on the XM4/XM5) and a 9-byte
- * NCASM_SET_PARAM payload:
+ * **XM6 uses sub-type 0x19** and a 9-byte NCASM_SET_PARAM payload.
+ * Byte positions verified empirically against user firmware.
  *
- *   68 19 01 <vcs> <totalEffect> <mode> <ambientVoice> <level> <na> <naSens>
+ *   68 19 01 <vcs> <totalEffect> <mode> <level> <ambientVoice> <na> <naSens>
  *
  * Frame: SOF(0x3E) | escape(DATA_TYPE seq SIZE-bigendian-4b PAYLOAD CHECKSUM) | EOF(0x3C)
  * Escape: 0x3C→0x3D 0x2C, 0x3D→0x3D 0x2D, 0x3E→0x3D 0x2E
  * Checksum: sum(DATA_TYPE + seq + SIZE + PAYLOAD) mod 256
  * Seq: alternates 0→1→0…, resets on reconnect
- *
- * @see <a href="https://github.com/PrathameshSujgure-git/xm6-control">xm6-control (verfied on XM6 FW 3.0.0)</a>
  */
 object SonyAncProtocol {
 
@@ -28,16 +26,16 @@ object SonyAncProtocol {
     private const val DATA_TYPE = 0x0C
 
     // ---- ANC payloads (XM6, sub-type 0x19, 9 bytes) ----
-    // 68 19 01 <vcs> <totalEffect> <mode> <ambientVoice> <level> <na> <naSensitivity>
+    // 68 19 01 <vcs> <totalEffect> <mode> <level> <ambientVoice> <na> <naSensitivity>
 
     /** Noise cancelling ON */
     val ANC_ON = byteArrayOf(
-        0x68, 0x19, 0x01,  // NCASM_SET_PARAM + XM6 sub-type + const
-        0x01,               // vcs = ON (value change signal)
-        0x01,               // totalEffect = ON (NC/ambient processing)
-        0x00,               // mode = NC (0 = NC, 1 = ambient)
+        0x68, 0x19, 0x01,
+        0x01,               // vcs
+        0x01,               // totalEffect = ON
+        0x00,               // mode = NC
+        0x14,               // level = 20
         0x00,               // ambientVoice = off
-        0x14,               // level = 20 (full)
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
@@ -45,11 +43,11 @@ object SonyAncProtocol {
     /** Ambient sound ON, level 20 */
     val AMBIENT = byteArrayOf(
         0x68, 0x19, 0x01,
-        0x01,               // vcs = ON
+        0x01,               // vcs
         0x01,               // totalEffect = ON
         0x01,               // mode = ambient
-        0x00,               // ambientVoice = off
         0x14,               // level = 20
+        0x00,               // ambientVoice = off
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
@@ -57,11 +55,11 @@ object SonyAncProtocol {
     /** ANC/Ambient OFF */
     val ANC_OFF = byteArrayOf(
         0x68, 0x19, 0x01,
-        0x01,               // vcs = ON
+        0x01,               // vcs
         0x00,               // totalEffect = OFF
         0x00,               // mode = N/A
-        0x00,               // ambientVoice = off
         0x14,               // level = 20
+        0x00,               // ambientVoice = off
         0x00,               // noiseAdaptive = off
         0x00,               // naSensitivity = 0
     )
