@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
+import java.util.UUID
 
 /**
  * Foreground service that connects to Sony WH-1000XM5/XM6 headphones
@@ -329,7 +330,6 @@ class BluetoothAncService : Service() {
         // Reconnection
         private const val MAX_RETRIES = 20
         private const val RETRY_DELAY_MS = 3_000L
-
-        private val PACKAGE = "com.fencewatcher.sonyanc"
+        private const val PACKAGE = "com.fencewatcher.sonyanc"
     }
 }

@@ -1,15 +1,15 @@
 package com.fencewatcher.sonyanc
 
 import android.content.Context
-import android.media.MediaController
-import android.media.MediaSessionManager
-import android.media.PlaybackState
+import android.media.session.MediaController
+import android.media.session.MediaSessionManager
+import android.media.session.PlaybackState
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 
 /**
- * Monitors all active [MediaSession]s and fires [onPlaybackChanged] whenever
+ * Monitors all active MediaSessions and fires [onPlaybackChanged] whenever
  * the global "any media is playing" state transitions.
  *
  * Tracks every active MediaController individually. The callback fires when
@@ -41,10 +41,10 @@ class MediaPlaybackMonitor(
                 val currentTokens = sessions?.map { it.sessionToken }?.toSet() ?: emptySet()
 
                 // Remove controllers that disappeared
-                controllers.keys
-                    .filter { it.sessionToken !in currentTokens }
-                    .toList()
-                    .forEach { removeController(it) }
+                val toRemove = controllers.keys.filter { it.sessionToken !in currentTokens }
+                for (ctrl in toRemove) {
+                    removeController(ctrl)
+                }
 
                 // Add new controllers
                 sessions?.forEach { controller ->
@@ -112,7 +112,10 @@ class MediaPlaybackMonitor(
     fun stop() {
         sessionManager.removeOnActiveSessionsChangedListener(sessionListener)
         synchronized(controllers) {
-            controllers.keys.toList().forEach { removeController(it) }
+            val all = controllers.keys.toList()
+            for (ctrl in all) {
+                removeController(ctrl)
+            }
         }
         lastReportedPlaying = null
     }
@@ -126,7 +129,10 @@ class MediaPlaybackMonitor(
     // ---- aggregate evaluation ----
 
     private fun reevaluate() {
-        val anyPlaying = synchronized(controllers) { controllers.values.any { it } }
+        val anyPlaying: Boolean
+        synchronized(controllers) {
+            anyPlaying = controllers.values.any { it }
+        }
         if (anyPlaying != lastReportedPlaying) {
             lastReportedPlaying = anyPlaying
             Log.d(tag, "Playback: ${if (anyPlaying) "▶ PLAYING" else "⏸ PAUSED"}")

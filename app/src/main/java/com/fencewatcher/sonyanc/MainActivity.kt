@@ -161,9 +161,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Populate dropdown
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerDevice.adapter = adapter
+        val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
+        listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerDevice.adapter = listAdapter
     }
 
     // ---- Toggle ----
