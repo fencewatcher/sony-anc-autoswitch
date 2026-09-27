@@ -320,34 +320,44 @@ class BluetoothAncService : Service() {
     }
 
     /**
-     * Sends an ANC command with a retry, using [Thread.sleep] for
-     * deterministic inter-attempt delay.
+     * Sends an ANC command twice with ALTERNATING seq bits so both
+     * attempts are independently processed by the headphones.
+     *
+     * If the first frame is received but not applied, the second
+     * arrives on a new seq and gets processed as a fresh command.
+     * If the first was applied, the second applies the same command
+     * again (harmless idempotent apply).
+     *
+     * After both sends, [currentSeq] is restored to the original
+     * value so the next call alternates correctly from the last
+     * seq the headphones saw.
      */
     private suspend fun sendAncCommandReliable(payload: ByteArray) {
-        val seq = currentSeq
-        for (attempt in 1..2) {
+        val firstSeq = currentSeq
+        val name = when {
+            payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
+            payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
+            payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
+            else -> "CUSTOM"
+        }
+        for ((i, seq) in listOf(firstSeq, firstSeq xor 1).withIndex()) {
             if (btSocket == null) break
-            val name = when {
-                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
-                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
-                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
-                else -> "CUSTOM"
-            }
             try {
                 val frame = SonyAncProtocol.buildFrame(seq, payload)
                 btSocket?.outputStream?.write(frame)
                 btSocket?.outputStream?.flush()
-                Log.d(tag, "Sent $name seq=$seq (attempt $attempt)")
+                Log.d(tag, "Sent $name seq=$seq (pass ${i + 1})")
             } catch (e: Exception) {
-                Log.w(tag, "$name attempt $attempt failed: ${e.message}")
+                Log.w(tag, "$name pass ${i + 1} failed: ${e.message}")
                 btSocket = null
                 try { btSocket?.close() } catch (_: Exception) {}
                 triggerReconnect()
                 return
             }
-            if (attempt == 1) Thread.sleep(400L)
+            if (i == 0) Thread.sleep(400L)
         }
-        currentSeq = seq xor 1
+        // Restore so next command alternates from last seq headphones saw (firstSeq xor 1)
+        currentSeq = firstSeq
     }
 
     /**
