@@ -48,9 +48,10 @@ class MediaPlaybackMonitor(
         if (polling) return
         polling = true
         // Fire initial state immediately
-        lastReportedPlaying = audioManager.isMusicActive
-        Log.d(tag, "Initial audio state: ${if (lastReportedPlaying == true) "PLAYING" else "SILENT"}")
-        onPlaybackChanged(lastReportedPlaying)
+        val initialPlaying = audioManager.isMusicActive
+        lastReportedPlaying = initialPlaying
+        Log.d(tag, "Initial audio state: ${if (initialPlaying) "PLAYING" else "SILENT"}")
+        onPlaybackChanged(initialPlaying)
         // Start polling loop
         mainHandler.post(pollRunnable)
     }
