@@ -207,9 +207,9 @@ class BluetoothAncService : Service() {
                 } catch (e: CancellationException) {
                     throw e  // Propagate cancellation
                 } catch (e: Exception) {
-                    Log.w(tag, "BT error: ${e.message}")
+                    Log.w(tag, "BT error: ${e.javaClass.simpleName}: ${e.message}")
                     status = Status.DISCONNECTED
-                    broadcastStatus(status, e.message)
+                    broadcastStatus(status, "${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
 
                     if (!isActive) break
 
@@ -226,7 +226,7 @@ class BluetoothAncService : Service() {
                 updateNotification("Stopped")
             } else {
                 status = Status.ERROR
-                broadcastStatus(status, "All 20 connection retries failed")
+                broadcastStatus(status, "All $MAX_RETRIES connection retries failed")
                 updateNotification("Connection failed")
             }
         }
@@ -283,8 +283,24 @@ class BluetoothAncService : Service() {
             return s
         } catch (e: Exception) {
             Log.w(tag, "Reflection channel-10 failed: ${e.message}")
-            throw IOException("All RFCOMM socket strategies failed")
         }
+
+        // Strategy 5: try reflection with channel 2, 3, 5, 15, 20
+        val extraChannels = intArrayOf(2, 3, 5, 15, 20)
+        for (ch in extraChannels) {
+            try {
+                val method = device.javaClass.getMethod(
+                    "createRfcommSocket", Int::class.java
+                )
+                val s = method.invoke(device, ch) as BluetoothSocket
+                Log.d(tag, "Socket created via reflection (channel $ch)")
+                return s
+            } catch (e: Exception) {
+                Log.w(tag, "Reflection channel-$ch failed: ${e.message}")
+            }
+        }
+
+        throw IOException("All RFCOMM socket strategies failed")
     }
 
     // ---- Media playback callback ----
