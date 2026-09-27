@@ -1,9 +1,8 @@
 package com.fencewatcher.sonyanc
 
 import android.content.Context
-import android.content.pm.PackageManager
 import android.media.AudioManager
-import android.media.MediaSessionManager
+import android.media.session.MediaSessionManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -102,9 +101,11 @@ class MediaPlaybackMonitor(
                 val usage = cfg.audioAttributes.usage
                 val isMedia = usage == android.media.AudioAttributes.USAGE_MEDIA
                 if (!isMedia) continue
-                val uid = cfg.clientUid
-                val pkgs = context.packageManager.getPackagesForUid(uid)
-                if (pkgs != null) packages.addAll(pkgs)
+                val uid = playbackConfigUid(cfg)
+                if (uid > 0) {
+                    val pkgs = context.packageManager.getPackagesForUid(uid)
+                    if (pkgs != null) packages.addAll(pkgs)
+                }
             }
         } catch (e: Exception) {
             Log.w(tag, "activePlaybackConfigurations failed: ${e.message}")
@@ -124,6 +125,17 @@ class MediaPlaybackMonitor(
         }
 
         return packages
+    }
+
+    /** getClientUid() isn't public API; retrieve it reflectively. */
+    private fun playbackConfigUid(cfg: android.media.AudioPlaybackConfiguration): Int {
+        return try {
+            val m = android.media.AudioPlaybackConfiguration::class.java
+                .getMethod("getClientUid")
+            m.invoke(cfg) as Int
+        } catch (_: Exception) {
+            -1
+        }
     }
 
     companion object {

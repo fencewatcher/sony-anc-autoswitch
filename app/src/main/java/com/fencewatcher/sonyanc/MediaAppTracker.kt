@@ -1,5 +1,6 @@
 package com.fencewatcher.sonyanc
 
+import android.content.ComponentName
 import android.content.Context
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -23,7 +24,6 @@ object MediaAppTracker {
 
     @Volatile
     var trackingEnabled = false
-        private set
 
     // package -> last posted timestamp
     private val activeNotifications = mutableMapOf<String, Long>()
@@ -52,7 +52,9 @@ object MediaAppTracker {
     fun updateTrackingState(context: Context) {
         trackingEnabled = try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            nm.isNotificationListenerAccessGranted(MediaNotificationListener::class.java)
+            nm.isNotificationListenerAccessGranted(
+                ComponentName(context, MediaNotificationListener::class.java)
+            )
         } catch (e: Exception) {
             Log.w(TAG, "Cannot check listener access: ${e.message}")
             false
@@ -60,13 +62,12 @@ object MediaAppTracker {
     }
 
     // Some apps post non-media notifications; media ones carry a transport
-    // category or a media-style with metadata/actions.
+    // category or a media-style session/token.
     private fun isMediaNotification(sbn: StatusBarNotification): Boolean {
         val n = sbn.notification
         return n.category == android.app.Notification.CATEGORY_TRANSPORT ||
-            n.category == android.app.Notification.CATEGORY_PROGRESS ||
             n.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) ||
-            n.extras.containsKey(android.app.Notification.EXTRA_MEDIA_METADATA) ||
+            n.extras.containsKey("android.media.metadata") ||
             sbn.key.contains("media") // fallback heuristic
     }
 }
