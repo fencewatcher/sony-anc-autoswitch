@@ -349,22 +349,6 @@ class BluetoothAncService : Service() {
         }
         currentSeq = seq xor 1
     }
-            try {
-                val frame = SonyAncProtocol.buildFrame(seq, payload)
-                btSocket?.outputStream?.write(frame)
-                btSocket?.outputStream?.flush()
-                Log.d(tag, "Sent $name seq=$seq (attempt ${attempt + 1})")
-            } catch (e: Exception) {
-                Log.w(tag, "$name attempt ${attempt + 1} failed: ${e.message}")
-                btSocket = null
-                try { btSocket?.close() } catch (_: Exception) {}
-                triggerReconnect()
-                return@withContext
-            }
-            if (attempt == 0) delay(350L)
-        }
-        currentSeq = seq xor 1
-    }
 
     /**
      * Legacy single-send kept for initial connection flow.
