@@ -91,6 +91,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnToggle.setOnClickListener { onToggleClicked() }
         binding.btnRefresh.setOnClickListener { onRefreshClicked() }
 
+        // Set build version
+        binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
+
         // Initial state
         updateServiceRunning(false)
 

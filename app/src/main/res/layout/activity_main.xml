@@ -108,6 +108,18 @@
             android:lineSpacingExtra="4dp"
             android:text="@string/info_text" />
 
+        <!-- Version indicator -->
+        <TextView
+            android:id="@+id/textVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:paddingTop="16dp"
+            android:paddingBottom="8dp"
+            android:textSize="11sp"
+            android:textColor="#FF666666"
+            android:text="v?" />
+
     </LinearLayout>
 
 </ScrollView>
