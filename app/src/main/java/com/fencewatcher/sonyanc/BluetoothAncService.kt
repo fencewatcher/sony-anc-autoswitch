@@ -326,7 +326,7 @@ class BluetoothAncService : Service() {
         // Wait a moment for headphone audio state to settle, then send
         scope.launch {
             delay(300L)  // brief settle, then send immediately
-            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_XM6
+            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT_7
             sendAncCommandReliable(cmd)
         }
     }

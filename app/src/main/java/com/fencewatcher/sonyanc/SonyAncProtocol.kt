@@ -22,20 +22,21 @@ object SonyAncProtocol {
     // ---- data type for control commands ----
     private const val DATA_TYPE = 0x0C
 
-    // ---- ANC payloads (v2, wind-noise-capable variant) ----
+    // ---- ANC payloads ----
     // 68 17 01 <ascOnOff> <ambientFlag> <wind> <focusOnVoice> <level>
+    // XM3/XM4 7-byte: 68 17 01 <ascOnOff> <ambientFlag> <level>
 
-    /** Noise cancelling ON — keep ambient level at 20 so the slider never gets overwritten */
+    // ---- XM5-style (8 bytes, v2 with wind reduction) ----
+    
     val ANC_ON = byteArrayOf(
         0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
         0x00,               // ambientFlag = NC
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x14,               // level = 20 (don't touch ambient slider)
+        0x14,               // level = 20
     )
 
-    /** Ambient sound ON, level 20 (full passthrough) */
     val AMBIENT = byteArrayOf(
         0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
@@ -45,32 +46,44 @@ object SonyAncProtocol {
         0x14,               // level = 20
     )
 
-    /** Ambient sound ON, level 20 — alternate byte order for XM6 */
+    // ---- XM6 alternative byte order (level at byte 6) ----
+    
     val AMBIENT_XM6 = byteArrayOf(
         0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
         0x01,               // ambientFlag = ambient
         0x02,               // wind = normal
-        0x14,               // level = 20 (XM6: level before focusOnVoice)
+        0x14,               // level = 20
         0x00,               // focusOnVoice = off
     )
 
-    /** ANC/Ambient OFF — keep ambient level at 20 */
+    // ---- XM3/XM4 style (7 bytes, no wind/focus fields) ----
+    
+    val AMBIENT_7 = byteArrayOf(
+        0x68, 0x17, 0x01,
+        0x01,               // ascOnOff = ON
+        0x01,               // ambientFlag = ambient
+        0x14,               // level = 20
+    )
+
+    // ---- All variants for testing ----
+    val ALL_AMBIENT = listOf(
+        "XM5-8byte" to AMBIENT,
+        "XM6-swapped" to AMBIENT_XM6,
+        "XM4-7byte" to AMBIENT_7,
+    )
+
     val ANC_OFF = byteArrayOf(
         0x68, 0x17, 0x01,
         0x00,               // ascOnOff = OFF
         0x00,               // ambientFlag = N/A
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x14,               // level = 20 (don't touch ambient slider)
+        0x14,               // level = 20
     )
 
     /**
      * Build a full MDR frame from a payload.
-     *
-     * @param seq     Sequence bit (0 or 1), alternated per message on this connection.
-     * @param payload Raw payload bytes (e.g. [ANC_ON]).
-     * @return Ready-to-send frame bytes.
      */
     fun buildFrame(seq: Int, payload: ByteArray): ByteArray {
         require(seq in 0..1) { "seq must be 0 or 1, got $seq" }
@@ -83,7 +96,6 @@ object SonyAncProtocol {
             (size and 0xFF).toByte(),
         )
 
-        // Body before escaping: DATA_TYPE + seq + SIZE(4) + payload
         val body = ByteArrayOutputStream(size + 6).apply {
             write(DATA_TYPE)
             write(seq)
@@ -91,26 +103,15 @@ object SonyAncProtocol {
             write(payload)
         }.toByteArray()
 
-        // Checksum = sum of all body bytes, mod 256
         val checksum = (body.sumOf { it.toInt() and 0xFF } % 256).toByte()
-
-        // Append checksum to body before escaping
         val bodyWithChecksum = body + checksum
-
-        // Escape everything between SOF and EOF
         val escaped = escape(bodyWithChecksum)
 
         return byteArrayOf(SOF) + escaped + byteArrayOf(EOF)
     }
 
-    /**
-     * Escape reserved bytes in data.
-     * 0x3C → 0x3D 0x2C
-     * 0x3D → 0x3D 0x2D
-     * 0x3E → 0x3D 0x2E
-     */
     private fun escape(data: ByteArray): ByteArray {
-        val out = ByteArrayOutputStream(data.size * 2) // worst-case all reserved
+        val out = ByteArrayOutputStream(data.size * 2)
         for (b in data) {
             when (b.toInt() and 0xFF) {
                 0x3E -> { out.write(0x3D); out.write(0x2E) }
@@ -122,7 +123,6 @@ object SonyAncProtocol {
         return out.toByteArray()
     }
 
-    /** For debug: describe a payload */
     fun describePayload(payload: ByteArray): String {
         return payload.joinToString(" ") { "%02x".format(it) }
     }
