@@ -35,14 +35,14 @@ object SonyAncProtocol {
         0x00,               // level = N/A for NC
     )
 
-    /** Ambient sound ON, level 20 (full passthrough) */
+    /** Ambient sound ON, level 10 (moderate passthrough) */
     val AMBIENT = byteArrayOf(
         0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
         0x01,               // ambientFlag = ambient
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x14,               // level = 20
+        0x14,               // level = 20 (full passthrough)
     )
 
     /** ANC/Ambient OFF (all processing disabled) */

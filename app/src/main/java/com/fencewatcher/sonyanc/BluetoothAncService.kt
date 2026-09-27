@@ -324,17 +324,40 @@ class BluetoothAncService : Service() {
     // ---- ANC command send ----
 
     private fun sendAncCommand(payload: ByteArray) {
-        val socket = btSocket ?: return
+        val socket = btSocket
+        if (socket == null) {
+            Log.w(tag, "Cannot send — no socket, will reconnect")
+            triggerReconnect()
+            return
+        }
         try {
+            val payloadName = when {
+                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
+                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
+                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
+                else -> "CUSTOM"
+            }
             val frame = SonyAncProtocol.buildFrame(currentSeq, payload)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
-            Log.d(tag, "Sent ANC: ${payload.firstOrNull()?.let { SonyAncProtocol.describePayload(payload) }}")
-            currentSeq = currentSeq xor 1  // Toggle seq bit
+            Log.d(tag, "Sent $payloadName seq=$currentSeq")
+            currentSeq = currentSeq xor 1
         } catch (e: Exception) {
-            Log.w(tag, "Write failed: ${e.message}")
-            // Connection lost — the read loop will detect this and trigger reconnect
+            Log.w(tag, "Write failed: ${e.message} — triggering reconnect")
+            btSocket = null
+            try { socket.close() } catch (_: Exception) {}
+            triggerReconnect()
         }
+    }
+
+    private fun triggerReconnect() {
+        val addr = deviceAddress ?: return
+        // First close old socket to unblock the read() loop
+        try {
+            btSocket?.close()
+        } catch (_: Exception) {}
+        btSocket = null
+        connectBluetooth(addr)
     }
 
     // ---- Notifications ----
