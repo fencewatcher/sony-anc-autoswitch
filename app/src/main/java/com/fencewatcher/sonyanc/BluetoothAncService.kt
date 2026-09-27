@@ -221,7 +221,7 @@ class BluetoothAncService : Service() {
 
                     Log.d(tag, "Handshake complete — sending active ANC command")
                     val initialCmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
-                    sendAncCommandReliable(initialCmd)
+                    sendFrame(initialCmd)
 
                     // Blocking read loop — any data or -1 / IOException = disconnected
                     val inputStream = socket.inputStream
@@ -357,7 +357,7 @@ class BluetoothAncService : Service() {
         scope.launch {
             delay(300L)  // brief settle, then send immediately
             val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
-            sendAncCommandReliable(cmd)
+            sendFrame(cmd)
         }
     }
 
