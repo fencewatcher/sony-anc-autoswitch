@@ -313,25 +313,54 @@ class BluetoothAncService : Service() {
 
         // Send command directly (coroutine-safe BT write)
         scope.launch {
-            if (playing) {
-                sendAncCommand(SonyAncProtocol.ANC_ON)
-            } else {
-                sendAncCommand(SonyAncProtocol.AMBIENT)
-            }
+            val cmd = if (playing) SonyAncProtocol.ANC_ON else SonyAncProtocol.AMBIENT
+            sendAncCommandReliable(cmd)
         }
     }
 
-    // ---- ANC command send ----
-
-    private fun sendAncCommand(payload: ByteArray) {
-        val socket = btSocket
-        if (socket == null) {
-            Log.w(tag, "Cannot send — no socket, will reconnect")
-            triggerReconnect()
-            return
+    /**
+     * Sends the same ANC command with a retry to overcome headphone-side
+     * frame drops. Sony's protocol notes that commands can "lag a few
+     * seconds" and sometimes need a nudge.
+     *
+     * The retry uses the SAME seq bit so the second frame is either
+     * accepted (if the first was lost) or harmlessly ignored as a
+     * duplicate (if the first was received).
+     */
+    private suspend fun sendAncCommandReliable(payload: ByteArray) = withContext(Dispatchers.IO) {
+        val seq = currentSeq
+        for (attempt in 0..1) {
+            if (btSocket == null) break
+            val name = when {
+                payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
+                payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
+                payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
+                else -> "CUSTOM"
+            }
+            try {
+                val frame = SonyAncProtocol.buildFrame(seq, payload)
+                btSocket?.outputStream?.write(frame)
+                btSocket?.outputStream?.flush()
+                Log.d(tag, "Sent $name seq=$seq (attempt ${attempt + 1})")
+            } catch (e: Exception) {
+                Log.w(tag, "$name attempt ${attempt + 1} failed: ${e.message}")
+                btSocket = null
+                try { btSocket?.close() } catch (_: Exception) {}
+                triggerReconnect()
+                return@withContext
+            }
+            if (attempt == 0) delay(350L)
         }
+        currentSeq = seq xor 1
+    }
+
+    /**
+     * Legacy single-send kept for initial connection flow.
+     */
+    private fun sendAncCommand(payload: ByteArray) {
+        val socket = btSocket ?: return
         try {
-            val payloadName = when {
+            val name = when {
                 payload.contentEquals(SonyAncProtocol.ANC_ON) -> "ANC_ON"
                 payload.contentEquals(SonyAncProtocol.AMBIENT) -> "AMBIENT"
                 payload.contentEquals(SonyAncProtocol.ANC_OFF) -> "ANC_OFF"
@@ -340,7 +369,7 @@ class BluetoothAncService : Service() {
             val frame = SonyAncProtocol.buildFrame(currentSeq, payload)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
-            Log.d(tag, "Sent $payloadName seq=$currentSeq")
+            Log.d(tag, "Sent $name seq=$currentSeq (single)")
             currentSeq = currentSeq xor 1
         } catch (e: Exception) {
             Log.w(tag, "Write failed: ${e.message} — triggering reconnect")
