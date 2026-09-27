@@ -25,34 +25,34 @@ object SonyAncProtocol {
     // ---- ANC payloads (v2, wind-noise-capable variant) ----
     // 68 17 01 <ascOnOff> <ambientFlag> <wind> <focusOnVoice> <level>
 
-    /** Noise cancelling ON */
+    /** Noise cancelling ON — keep ambient level at 20 so the slider never gets overwritten */
     val ANC_ON = byteArrayOf(
-        0x68, 0x17, 0x01,  // NCASM_SET_PARAM + v2 sub-type + const
+        0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
-        0x00,               // ambientFlag = NC (not ambient)
+        0x00,               // ambientFlag = NC
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x00,               // level = N/A for NC
+        0x14,               // level = 20 (don't touch ambient slider)
     )
 
-    /** Ambient sound ON, level 10 (moderate passthrough) */
+    /** Ambient sound ON, level 20 (full passthrough) */
     val AMBIENT = byteArrayOf(
         0x68, 0x17, 0x01,
         0x01,               // ascOnOff = ON
         0x01,               // ambientFlag = ambient
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x14,               // level = 20 (full passthrough)
+        0x14,               // level = 20
     )
 
-    /** ANC/Ambient OFF (all processing disabled) */
+    /** ANC/Ambient OFF — keep ambient level at 20 */
     val ANC_OFF = byteArrayOf(
         0x68, 0x17, 0x01,
         0x00,               // ascOnOff = OFF
         0x00,               // ambientFlag = N/A
         0x02,               // wind = normal
         0x00,               // focusOnVoice = off
-        0x00,               // level = N/A
+        0x14,               // level = 20 (don't touch ambient slider)
     )
 
     /**
