@@ -500,26 +500,29 @@
                     android:textColor="#FF666666"
                     android:text="Service must be running to apply EQ" />
 
-                <!-- Custom EQ bands (10 bands, shown when Custom is tapped) -->
+                <!-- Custom EQ bands (always visible — disabled for built-in presets) -->
                 <LinearLayout
-                    android:id="@+id/customEQSection"
+                    android:id="@+id/eqBandSection"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:visibility="gone"
-                    android:paddingTop="20dp">
+                    android:paddingTop="20dp"
+                    android:paddingBottom="8dp"
+                    android:background="@color/surface"
+                    android:padding="12dp"
+                    android:layout_marginTop="12dp">
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="CUSTOM BANDS"
+                        android:text="BANDS"
                         android:textSize="11sp"
                         android:textStyle="bold"
                         android:textColor="#FF888888"
                         android:paddingBottom="8dp" />
 
                     <LinearLayout
-                        android:id="@+id/customEQSliders"
+                        android:id="@+id/eqBandsContainer"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical" />
@@ -528,10 +531,11 @@
                         android:id="@+id/btnApplyCustomEQ"
                         android:layout_width="match_parent"
                         android:layout_height="44dp"
-                        android:text="Apply Custom EQ"
+                        android:text="Write to Custom"
                         android:textColor="@android:color/white"
-                        android:backgroundTint="#FFAA44"
-                        android:layout_marginTop="12dp" />
+                        android:backgroundTint="#CC8833"
+                        android:layout_marginTop="12dp"
+                        android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout>
         </LinearLayout>
