@@ -222,7 +222,10 @@ class MainActivity : AppCompatActivity() {
         // Read values from graph view for Apply
         val presetName = EQPreset.fromId(selectedEQProfile).displayName
         binding.textEQStatus.text = "↻ Writing $presetName..."
-        sendToService(ACTION_SET_EQ_CUSTOM) { putExtra(EXTRA_EQ_BANDS, binding.eqGraph.bandValues) }
+        sendToService(ACTION_SET_EQ_CUSTOM) { 
+            putExtra(EXTRA_EQ_BANDS, binding.eqGraph.bandValues)
+            putExtra(EXTRA_EQ_PRESET, selectedEQProfile)
+        }
         Handler(Looper.getMainLooper()).postDelayed({
             if (binding.textEQStatus.text.startsWith("↻")) updateEQStatus()
         }, 3000)

@@ -110,9 +110,10 @@ class BluetoothAncService : Service() {
 
                 ACTION_SET_EQ_CUSTOM -> {
                     val bands = intent.getIntArrayExtra(EXTRA_EQ_BANDS)
+                    val presetId = intent.getIntExtra(EXTRA_EQ_PRESET, 0xA0)
                     if (bands != null) {
-                        Log.d(tag, "Setting custom EQ (${bands.size} bands)")
-                        scope.launch { setCustomEQ(bands) }
+                        Log.d(tag, "Setting custom EQ for 0x%02x (%d bands)".format(presetId, bands.size))
+                        scope.launch { setCustomEQ(bands, presetId) }
                     }
                 }
             }
@@ -525,11 +526,11 @@ class BluetoothAncService : Service() {
         sendFrame(byteArrayOf(0x56, 0x00))
     }
 
-    /** Set custom EQ bands (10 bands for XM6: 31Hz–16kHz, range -6..+6, offset +6). */
-    private suspend fun setCustomEQ(bands: IntArray) {
+    /** Set custom EQ bands for a specific profile (0xA0=Custom, 0xA1=User1, etc.). */
+    private suspend fun setCustomEQ(bands: IntArray, presetId: Int = 0xA0) {
         val count = bands.size
         val offset = if (count == 10) 6 else 10
-        var payload = byteArrayOf(0x58, 0x00, 0xA0.toByte(), count.toByte())
+        var payload = byteArrayOf(0x58, 0x00, presetId.toByte(), count.toByte())
         for (v in bands) {
             val clamped = (v + offset).coerceIn(0, 2 * offset)
             payload += clamped.toByte()
