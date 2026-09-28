@@ -418,7 +418,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateServiceRunning(running: Boolean) {
         serviceRunning = running
-        binding.btnToggle.text = if (running) "Stop Service" else "Start Service"
+        binding.btnToggle.text = if (running) "⏹ Stop" else "▶ Start"
         binding.btnToggle.setBackgroundColor(ContextCompat.getColor(this,
             if (running) android.R.color.holo_red_dark else android.R.color.holo_green_dark))
     }

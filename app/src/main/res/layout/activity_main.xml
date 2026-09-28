@@ -154,10 +154,11 @@
                     android:id="@+id/btnToggle"
                     android:layout_width="match_parent"
                     android:layout_height="56dp"
-                    android:text="Start Service"
+                    android:text="▶ Start"
                     android:textColor="@android:color/white"
-                    android:textSize="16sp"
+                    android:textSize="15sp"
                     android:enabled="false"
+                    android:paddingHorizontal="8dp"
                     android:layout_marginBottom="12dp" />
 
                 <LinearLayout
