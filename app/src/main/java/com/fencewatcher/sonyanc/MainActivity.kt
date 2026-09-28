@@ -186,7 +186,10 @@ class MainActivity : AppCompatActivity() {
         binding.underlineDashboard.setBackgroundColor(if (tab == 0) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
         binding.underlineSettings.setBackgroundColor(if (tab == 1) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
         binding.underlineEQ.setBackgroundColor(if (tab == 2) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
-        if (tab == 2) binding.eqGraph.bandValues = eqBandValues
+        if (tab == 2) {
+            binding.eqGraph.bandValues = eqBandValues
+            if (BluetoothAncService.isRunning) sendToService(ACTION_GET_STATUS) {}
+        }
     }
 
     // ---- EQ ----

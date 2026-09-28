@@ -79,6 +79,7 @@ class BluetoothAncService : Service() {
 
                 ACTION_GET_STATUS -> {
                     broadcastStatus(status)
+                    scope.launch { sendFrame(byteArrayOf(0x56, 0x00)) }
                 }
 
                 ACTION_ANC_ON -> {
