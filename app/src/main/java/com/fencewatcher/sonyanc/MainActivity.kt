@@ -281,40 +281,31 @@ class MainActivity : AppCompatActivity() {
         val container = binding.customEQSliders
         container.removeAllViews()
         for (i in eqBandLabels.indices) {
-            val label = eqBandLabels[i]
-            val row = LinearLayout(this).apply {
-                orientation = HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, 4, 0, 4)
-            }
-            // Band label
-            val labelView = TextView(this).apply {
-                text = "${label}Hz"
-                setTextColor(Color.rgb(224, 224, 224))
+            val row = android.widget.LinearLayout(this)
+            row.orientation = android.widget.LinearLayout.HORIZONTAL
+            row.gravity = android.view.Gravity.CENTER_VERTICAL
+            row.setPadding(0, 4, 0, 4)
+
+            val labelView = android.widget.TextView(this).apply {
+                text = "${eqBandLabels[i]}Hz"
+                setTextColor(android.graphics.Color.rgb(224, 224, 224))
                 textSize = 13f
                 minWidth = 80
+                gravity = android.view.Gravity.CENTER_VERTICAL
             }
-            // SeekBar in range 0..12 (represents -6..+6)
-            val seekBar = SeekBar(this).apply {
-                max = 12
-                progress = 6 // 0 offset = neutral
-                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
-                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
-                        eqBandValues[i] = v - 6
-                    }
-                    override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
-                    override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
-                })
-            }
-            // Value text
-            val valueView = TextView(this).apply {
+
+            val seekBar = android.widget.SeekBar(this)
+            seekBar.max = 12
+            seekBar.progress = 6
+
+            val valueView = android.widget.TextView(this).apply {
                 text = "0"
-                setTextColor(Color.rgb(160, 160, 160))
+                setTextColor(android.graphics.Color.rgb(160, 160, 160))
                 textSize = 12f
                 minWidth = 30
                 gravity = android.view.Gravity.CENTER
             }
+
             seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
                     eqBandValues[i] = v - 6
@@ -323,8 +314,10 @@ class MainActivity : AppCompatActivity() {
                 override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
                 override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
             })
+
             row.addView(labelView)
-            row.addView(seekBar)
+            val lp = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            row.addView(seekBar, lp)
             row.addView(valueView)
             container.addView(row)
         }
