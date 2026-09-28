@@ -131,7 +131,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Device spinner selection — load settings for that device
-        binding.spinnerDevice.setOnItemSelectedListener { _, _, _, _ -> loadDeviceSettings() }
+        binding.spinnerDevice.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
+                loadDeviceSettings()
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
 
         binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
         updateServiceRunning(BluetoothAncService.isRunning)
