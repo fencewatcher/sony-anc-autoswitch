@@ -38,6 +38,8 @@ class BluetoothAncService : Service() {
     private var deviceAddress: String? = null
     private var batteryPercent: Int? = null
     private var currentModeName: String = "—"
+    @Volatile
+    private var autoPaused = false
 
     // ---- Lifecycle ----
 
@@ -91,6 +93,12 @@ class BluetoothAncService : Service() {
                 ACTION_ANC_OFF -> {
                     Log.d(tag, "Debug: manual ANC OFF")
                     scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_OFF) }
+                }
+
+                ACTION_TOGGLE_AUTO -> {
+                    autoPaused = !autoPaused
+                    Log.d(tag, "Auto-pause: ${if (autoPaused) "PAUSED" else "RUNNING"}")
+                    refreshNotification()
                 }
             }
         } catch (e: Exception) {
@@ -437,6 +445,10 @@ class BluetoothAncService : Service() {
     // ---- Media playback callback ----
 
     private fun onMediaStateChanged(playing: Boolean) {
+        if (autoPaused) {
+            Log.d(tag, "Auto-paused — ignoring media change")
+            return
+        }
         if (playing == isMediaPlaying) return  // No change
         isMediaPlaying = playing
         Log.d(tag, "Media ${if (playing) "playing" else "paused"}")
@@ -595,10 +607,20 @@ class BluetoothAncService : Service() {
     }
 
     private fun buildNotification(text: String): Notification {
-        val stopIntent = PendingIntent.getService(
+        val toggleLabel: String
+        val toggleIcon: Int
+        if (autoPaused) {
+            toggleLabel = "▶ Resume"
+            toggleIcon = android.R.drawable.ic_media_play
+        } else {
+            toggleLabel = "⏸ Pause"
+            toggleIcon = android.R.drawable.ic_media_pause
+        }
+
+        val toggleIntent = PendingIntent.getService(
             this,
             0,
-            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_STOP },
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_TOGGLE_AUTO },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
@@ -623,12 +645,14 @@ class BluetoothAncService : Service() {
 
         // Quick stats: battery + current mode
         val stats = buildString {
-            if (batteryPercent != null) {
-                append("🔋 $batteryPercent%")
-            }
-            if (currentModeName != "—") {
-                if (isNotEmpty()) append(" · ")
-                append("🎧 $currentModeName")
+            if (autoPaused) {
+                append("⏸ Auto-paused")
+            } else {
+                if (batteryPercent != null) append("🔋 $batteryPercent%")
+                if (currentModeName != "—") {
+                    if (isNotEmpty()) append(" · ")
+                    append("🎧 $currentModeName")
+                }
             }
         }
 
@@ -641,7 +665,7 @@ class BluetoothAncService : Service() {
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
-            .addAction(android.R.drawable.ic_media_pause, "Stop", stopIntent)
+            .addAction(toggleIcon, toggleLabel, toggleIntent)
             .addAction(0, "🔇 NC", ancOnIntent)
             .addAction(0, "🌬 Ambient", ambientIntent)
             .addAction(0, "⛔ Off", ancOffIntent)
@@ -660,11 +684,13 @@ class BluetoothAncService : Service() {
     /** Refreshes the notification with current stats without changing the main text. */
     private fun refreshNotification() {
         // Reuse last text by rebuilding with stats (battery/mode changed)
-        val base = when (status) {
-            Status.CONNECTED -> if (isMediaPlaying) "▶ Playing" else "⏸ Paused"
-            Status.CONNECTING -> "Connecting…"
-            Status.DISCONNECTED -> "Disconnected"
-            Status.ERROR -> "Error"
+        val base = when {
+            autoPaused -> "⏸ Auto-paused"
+            status == Status.CONNECTED -> if (isMediaPlaying) "▶ Playing" else "⏸ Paused"
+            status == Status.CONNECTING -> "Connecting…"
+            status == Status.DISCONNECTED -> "Disconnected"
+            status == Status.ERROR -> "Error"
+            else -> "—"
         }
         updateNotification(base)
         broadcastStats()
@@ -724,6 +750,7 @@ class BluetoothAncService : Service() {
         const val ACTION_ANC_ON = "$PACKAGE.action.ANC_ON"
         const val ACTION_AMBIENT = "$PACKAGE.action.AMBIENT"
         const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
+        const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
