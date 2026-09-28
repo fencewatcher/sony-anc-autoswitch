@@ -31,6 +31,7 @@ class MediaPlaybackMonitor(
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
     private var lastReportedPlaying: Boolean? = null
+    private var pendingCount = 0
     private var polling = false
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -40,9 +41,15 @@ class MediaPlaybackMonitor(
             val rawPlaying = audioManager.isMusicActive
             val isPlaying = rawPlaying && isAllowedByAllowlist()
             if (isPlaying != lastReportedPlaying) {
-                lastReportedPlaying = isPlaying
-                Log.d(tag, if (isPlaying) "▶ PLAYING" else "⏸ PAUSED")
-                onPlaybackChanged(isPlaying)
+                pendingCount++
+                if (pendingCount >= DEBOUNCE_COUNT) {
+                    pendingCount = 0
+                    lastReportedPlaying = isPlaying
+                    Log.d(tag, if (isPlaying) "▶ PLAYING (stable)" else "⏸ PAUSED (stable)")
+                    onPlaybackChanged(isPlaying)
+                }
+            } else {
+                pendingCount = 0
             }
             mainHandler.postDelayed(this, POLL_INTERVAL_MS)
         }
@@ -181,5 +188,7 @@ class MediaPlaybackMonitor(
 
     companion object {
         private const val POLL_INTERVAL_MS = 200L
+        /** Require this many consecutive polls with the same state before reporting a change (≈1s). */
+        private const val DEBOUNCE_COUNT = 5
     }
 }

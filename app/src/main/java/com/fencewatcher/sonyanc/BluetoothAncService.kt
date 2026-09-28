@@ -411,6 +411,25 @@ class BluetoothAncService : Service() {
                 }
                 refreshNotification()
             }
+
+            0x37, 0x39 -> {  // PERIPHERAL RET / NTFY — multipoint device list
+                val subtype = p[1].toInt() and 0xFF
+                if (subtype == 0x02 || subtype == 0x00) {
+                    val devices = SonyAncProtocol.decodeDeviceList(p)
+                    if (devices != null) {
+                        Log.d(tag, "Multipoint devices: ${devices.size} entries")
+                        connectedDevices = devices
+                        broadcastStats()
+                    }
+                }
+            }
+
+            0x27, 0x29 -> {  // Auto-power-off RET / NTFY
+                val mode = SonyAncProtocol.decodeAutoPowerOff(p)
+                if (mode != null) {
+                    autoPowerOffMode = mode
+                }
+            }
         }
     }
 
@@ -751,6 +770,12 @@ class BluetoothAncService : Service() {
     var eqActiveBands: IntArray? = null
         private set
 
+    // Multipoint device list from PERIPHERAL NTFY
+    var connectedDevices: List<MultipointDevice> = emptyList()
+        private set
+    var autoPowerOffMode: Int = 0
+        private set
+
     private fun broadcastStatus(s: Status, message: String? = null) {
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, s.name)
@@ -774,6 +799,10 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_MODE, currentModeName)
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
             eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
+            if (connectedDevices.isNotEmpty()) {
+                putExtra(EXTRA_DEVICE_LIST, connectedDevices.filter { it.connectedStatus > 0 }.map { it.name }.toTypedArray())
+            }
+            if (autoPowerOffMode != 0) putExtra(EXTRA_AUTO_POWER_MODE, autoPowerOffMode)
             `package` = packageName
         }
         try { sendBroadcast(intent) } catch (_: Exception) {}
@@ -812,6 +841,8 @@ class BluetoothAncService : Service() {
         const val EXTRA_EQ_BANDS = "eq_bands"
         const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
         const val EXTRA_EQ_ACTIVE_BANDS = "eq_active_bands"
+        const val EXTRA_DEVICE_LIST = "device_list"
+        const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast
         const val STATUS_BROADCAST = "$PACKAGE.STATUS"
