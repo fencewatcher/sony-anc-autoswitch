@@ -393,6 +393,22 @@ class BluetoothAncService : Service() {
                     refreshNotification()
                 }
             }
+
+            0x57, 0x59 -> {  // EQ RET / NTFY: pid, subtype, presetID, count, values…
+                val presetId = if (p.size >= 3) p[2].toInt() and 0xFF else 0
+                val bandCount = if (p.size >= 4) p[3].toInt() and 0xFF else 0
+                eqActivePreset = presetId
+                if (bandCount > 0 && p.size >= 4 + bandCount) {
+                    val bands = p.copyOfRange(4, 4 + bandCount)
+                        .map { (it.toInt() and 0xFF) - 6 }.toIntArray()
+                    eqActiveBands = bands
+                    Log.d(tag, "EQ state: preset=0x%02x, %d bands".format(presetId, bandCount))
+                } else {
+                    eqActiveBands = null
+                    Log.d(tag, "EQ state: preset=0x%02x, no bands".format(presetId))
+                }
+                refreshNotification()
+            }
         }
     }
 
@@ -726,6 +742,12 @@ class BluetoothAncService : Service() {
     var status: Status = Status.DISCONNECTED
         private set
 
+    // Tracked EQ state (from incoming 0x57/0x59 frames)
+    var eqActivePreset: Int = 0
+        private set
+    var eqActiveBands: IntArray? = null
+        private set
+
     private fun broadcastStatus(s: Status, message: String? = null) {
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, s.name)
@@ -747,6 +769,8 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
+            eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
             `package` = packageName
         }
         try { sendBroadcast(intent) } catch (_: Exception) {}
@@ -783,6 +807,8 @@ class BluetoothAncService : Service() {
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_EQ_PRESET = "eq_preset"
         const val EXTRA_EQ_BANDS = "eq_bands"
+        const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
+        const val EXTRA_EQ_ACTIVE_BANDS = "eq_active_bands"
 
         // Status broadcast
         const val STATUS_BROADCAST = "$PACKAGE.STATUS"
