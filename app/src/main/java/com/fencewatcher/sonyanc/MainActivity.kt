@@ -30,8 +30,9 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_OFF
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ_CUSTOM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_PRESET
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_BANDS
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
@@ -48,6 +49,11 @@ class MainActivity : AppCompatActivity() {
     private var currentMode = "—"
     private var selectedAddress: String? = null
     private var showingTab = 0 // 0=Dashboard, 1=Settings, 2=EQ
+
+    // Custom EQ state (10 bands, range -6..+6, 0 = neutral)
+    private val eqBandLabels = arrayOf("31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
+    private val eqBandValues = IntArray(10) { 0 }
+    private var slidersInitialized = false
 
     private val requiredPermissions = mutableListOf<String>().apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -135,9 +141,10 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQClear.setOnClickListener { sendEQ(0x31) }
         binding.btnEQHard.setOnClickListener { sendEQ(0x32) }
         binding.btnEQSoft.setOnClickListener { sendEQ(0x33) }
-        binding.btnEQCustom.setOnClickListener { sendEQ(0xA0) }
+        binding.btnEQCustom.setOnClickListener { onClickEQCustom() }
         binding.btnEQUser1.setOnClickListener { sendEQ(0xA1) }
         binding.btnEQUser2.setOnClickListener { sendEQ(0xA2) }
+        binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
 
         binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
         updateServiceRunning(BluetoothAncService.isRunning)
@@ -261,6 +268,76 @@ class MainActivity : AppCompatActivity() {
             putExtra(EXTRA_EQ_PRESET, presetId)
         }.also { startService(it) }
         Toast.makeText(this, "EQ: ${preset.displayName}", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun onClickEQCustom() {
+        sendEQ(0xA0) // select Custom preset on headphones first
+        binding.customEQSection.visibility = View.VISIBLE
+        if (!slidersInitialized) populateCustomEQSliders()
+    }
+
+    private fun populateCustomEQSliders() {
+        slidersInitialized = true
+        val container = binding.customEQSliders
+        container.removeAllViews()
+        for (i in eqBandLabels.indices) {
+            val label = eqBandLabels[i]
+            val row = LinearLayout(this).apply {
+                orientation = HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 4, 0, 4)
+            }
+            // Band label
+            val labelView = TextView(this).apply {
+                text = "${label}Hz"
+                setTextColor(Color.rgb(224, 224, 224))
+                textSize = 13f
+                minWidth = 80
+            }
+            // SeekBar in range 0..12 (represents -6..+6)
+            val seekBar = SeekBar(this).apply {
+                max = 12
+                progress = 6 // 0 offset = neutral
+                layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
+                setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                    override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
+                        eqBandValues[i] = v - 6
+                    }
+                    override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+                    override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+                })
+            }
+            // Value text
+            val valueView = TextView(this).apply {
+                text = "0"
+                setTextColor(Color.rgb(160, 160, 160))
+                textSize = 12f
+                minWidth = 30
+                gravity = android.view.Gravity.CENTER
+            }
+            seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
+                    eqBandValues[i] = v - 6
+                    valueView.text = (v - 6).toString()
+                }
+                override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+            })
+            row.addView(labelView)
+            row.addView(seekBar)
+            row.addView(valueView)
+            container.addView(row)
+        }
+    }
+
+    private fun applyCustomEQ() {
+        if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start the service first", Toast.LENGTH_SHORT).show(); return }
+        binding.textEQStatus.text = "Applying custom EQ…"
+        Intent(this, BluetoothAncService::class.java).apply {
+            action = ACTION_SET_EQ_CUSTOM
+            putExtra(EXTRA_EQ_BANDS, eqBandValues)
+        }.also { startService(it) }
+        Toast.makeText(this, "Custom EQ applied", Toast.LENGTH_SHORT).show()
     }
 
     // ---- Permissions ----

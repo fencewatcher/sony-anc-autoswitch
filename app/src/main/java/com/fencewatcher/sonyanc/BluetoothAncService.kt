@@ -107,6 +107,14 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Setting EQ preset to ${String.format("0x%02x", presetId)}")
                     scope.launch { setEQPreset(presetId) }
                 }
+
+                ACTION_SET_EQ_CUSTOM -> {
+                    val bands = intent.getIntArrayExtra(EXTRA_EQ_BANDS)
+                    if (bands != null) {
+                        Log.d(tag, "Setting custom EQ (${bands.size} bands)")
+                        scope.launch { setCustomEQ(bands) }
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -501,6 +509,20 @@ class BluetoothAncService : Service() {
         sendFrame(byteArrayOf(0x56, 0x00))
     }
 
+    /** Set custom EQ bands (10 bands for XM6: 31Hz–16kHz, range -6..+6, offset +6). */
+    private suspend fun setCustomEQ(bands: IntArray) {
+        val count = bands.size
+        val offset = if (count == 10) 6 else 10
+        var payload = byteArrayOf(0x58, 0x00, 0xA0.toByte(), count.toByte())
+        for (v in bands) {
+            val clamped = (v + offset).coerceIn(0, 2 * offset)
+            payload += clamped.toByte()
+        }
+        sendFrame(payload)
+        delay(100L)
+        sendFrame(byteArrayOf(0x56, 0x00))
+    }
+
     /**
      * Send a protocol ACK frame (dataType=0x01, flipped seq, empty payload).
      */
@@ -752,6 +774,7 @@ class BluetoothAncService : Service() {
         const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
         const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"
+        const val ACTION_SET_EQ_CUSTOM = "$PACKAGE.action.SET_EQ_CUSTOM"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
@@ -759,6 +782,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_EQ_PRESET = "eq_preset"
+        const val EXTRA_EQ_BANDS = "eq_bands"
 
         // Status broadcast
         const val STATUS_BROADCAST = "$PACKAGE.STATUS"
