@@ -124,27 +124,6 @@ class BluetoothAncService : Service() {
                         sendFrame(SonyAncProtocol.buildPowerOff())
                     }
                 }
-
-                ACTION_REFRESH_DEVICES -> {
-                    Log.d(tag, "Refreshing multipoint device list")
-                    scope.launch {
-                        sendFrame(SonyAncProtocol.buildDeviceListGet(), type = 0x0E)
-                    }
-                }
-
-                ACTION_SET_AUTO_POWER -> {
-                    val mode = intent.getByteExtra("mode", 0x10)
-                    scope.launch {
-                        sendFrame(SonyAncProtocol.buildAutoPowerOffSet(mode))
-                    }
-                }
-
-                ACTION_SET_TOUCH -> {
-                    val enabled = intent.getBooleanExtra("enabled", true)
-                    scope.launch {
-                        sendFrame(SonyAncProtocol.buildTouchSensorSet(enabled))
-                    }
-                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -860,9 +839,6 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"
         const val ACTION_SET_EQ_CUSTOM = "$PACKAGE.action.SET_EQ_CUSTOM"
         const val ACTION_POWER_OFF = "$PACKAGE.action.POWER_OFF"
-        const val ACTION_REFRESH_DEVICES = "$PACKAGE.action.REFRESH_DEVICES"
-        const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
-        const val ACTION_SET_TOUCH = "$PACKAGE.action.SET_TOUCH"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
