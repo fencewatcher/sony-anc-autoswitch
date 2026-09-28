@@ -182,6 +182,10 @@ class MainActivity : AppCompatActivity() {
             t.setTextColor(if (i == tab) active else muted)
             t.setTypeface(null, if (i == tab) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
+        // Tab underlines
+        binding.underlineDashboard.setBackgroundColor(if (tab == 0) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
+        binding.underlineSettings.setBackgroundColor(if (tab == 1) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
+        binding.underlineEQ.setBackgroundColor(if (tab == 2) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
         if (tab == 2) binding.eqGraph.bandValues = eqBandValues
     }
 

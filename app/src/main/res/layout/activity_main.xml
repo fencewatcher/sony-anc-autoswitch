@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@color/dark_gray">
 
-    <!-- ===== Tab Bar (3 tabs) ===== -->
+    <!-- ===== Tab Bar (3 tabs) with underline indicator ===== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="48dp"
@@ -15,39 +15,78 @@
         android:orientation="horizontal"
         android:paddingHorizontal="16dp">
 
-        <TextView
-            android:id="@+id/tabDashboard"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="Dashboard"
-            android:textSize="15sp"
-            android:textStyle="bold"
-            android:textColor="@color/on_surface"
-            android:paddingVertical="12dp" />
+            android:orientation="vertical"
+            android:gravity="center">
 
-        <TextView
-            android:id="@+id/tabSettings"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="Settings"
-            android:textSize="15sp"
-            android:textColor="#FF888888"
-            android:paddingVertical="12dp" />
+            <TextView
+                android:id="@+id/tabDashboard"
+                android:layout_width="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Dashboard"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:textColor="@color/on_surface" />
 
-        <TextView
-            android:id="@+id/tabEQ"
+            <View
+                android:id="@+id/underlineDashboard"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:background="#FF66BBFF" />
+        </LinearLayout>
+
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_weight="1"
             android:layout_height="match_parent"
-            android:gravity="center"
-            android:text="EQ"
-            android:textSize="15sp"
-            android:textColor="#FF888888"
-            android:paddingVertical="12dp" />
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tabSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="Settings"
+                android:textSize="15sp"
+                android:textColor="#FF888888" />
+
+            <View
+                android:id="@+id/underlineSettings"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:background="#00000000" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <TextView
+                android:id="@+id/tabEQ"
+                android:layout_width="wrap_content"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:text="EQ"
+                android:textSize="15sp"
+                android:textColor="#FF888888" />
+
+            <View
+                android:id="@+id/underlineEQ"
+                android:layout_width="match_parent"
+                android:layout_height="3dp"
+                android:background="#00000000" />
+        </LinearLayout>
     </LinearLayout>
 
     <ScrollView
@@ -175,6 +214,7 @@
                         android:layout_height="44dp"
                         android:text="🔇 NC"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF446688"
                         android:layout_marginEnd="4dp" />
 
@@ -185,6 +225,7 @@
                         android:layout_height="44dp"
                         android:text="🌬 Ambient"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF448866"
                         android:layout_marginHorizontal="4dp" />
 
@@ -195,6 +236,7 @@
                         android:layout_height="44dp"
                         android:text="⛔ Off"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF884444"
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
@@ -333,8 +375,9 @@
                     android:id="@+id/btnChooseApps"
                     android:layout_width="match_parent"
                     android:layout_height="44dp"
-                    android:text="Choose apps…"
+                    android:text="Select apps…"
                     android:textColor="@android:color/white"
+                    android:paddingHorizontal="8dp"
                     android:backgroundTint="#FF445577"
                     android:layout_marginTop="8dp" />
 
@@ -351,8 +394,9 @@
                     android:id="@+id/btnNotifAccess"
                     android:layout_width="match_parent"
                     android:layout_height="44dp"
-                    android:text="Enable app detection (notification access)"
+                    android:text="Enable notification access"
                     android:textColor="@android:color/white"
+                    android:paddingHorizontal="8dp"
                     android:backgroundTint="#FF774444"
                     android:layout_marginTop="4dp" />
             </LinearLayout>
@@ -397,6 +441,7 @@
                         android:layout_height="48dp"
                         android:text="Off"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginEnd="4dp" />
 
@@ -407,6 +452,7 @@
                         android:layout_height="48dp"
                         android:text="Heavy"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
@@ -424,6 +470,7 @@
                         android:layout_height="48dp"
                         android:text="Clear"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginEnd="4dp" />
 
@@ -434,6 +481,7 @@
                         android:layout_height="48dp"
                         android:text="Hard"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
@@ -451,6 +499,7 @@
                         android:layout_height="48dp"
                         android:text="Soft"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginEnd="4dp" />
 
@@ -461,6 +510,7 @@
                         android:layout_height="48dp"
                         android:text="Custom"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
@@ -477,6 +527,7 @@
                         android:layout_height="48dp"
                         android:text="User 1"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginEnd="4dp" />
 
@@ -487,6 +538,7 @@
                         android:layout_height="48dp"
                         android:text="User 2"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#FF555555"
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
@@ -533,6 +585,7 @@
                         android:layout_height="44dp"
                         android:text="Write to Custom"
                         android:textColor="@android:color/white"
+                        android:paddingHorizontal="8dp"
                         android:backgroundTint="#CC8833"
                         android:layout_marginTop="12dp"
                         android:visibility="gone" />
