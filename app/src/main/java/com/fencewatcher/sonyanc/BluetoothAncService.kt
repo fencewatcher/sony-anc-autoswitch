@@ -101,6 +101,12 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Auto-pause: ${if (autoPaused) "PAUSED" else "RUNNING"}")
                     refreshNotification()
                 }
+
+                ACTION_SET_EQ -> {
+                    val presetId = intent.getIntExtra(EXTRA_EQ_PRESET, 0)
+                    Log.d(tag, "Setting EQ preset to ${String.format("0x%02x", presetId)}")
+                    scope.launch { setEQPreset(presetId) }
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -488,6 +494,13 @@ class BluetoothAncService : Service() {
         }
     }
 
+    /** Set an EQ preset. Command: 58 00 <presetID> 00, then re-query with 56 00. */
+    private suspend fun setEQPreset(presetId: Int) {
+        sendFrame(byteArrayOf(0x58, 0x00, presetId.toByte(), 0x00))
+        delay(100L)
+        sendFrame(byteArrayOf(0x56, 0x00))
+    }
+
     /**
      * Send a protocol ACK frame (dataType=0x01, flipped seq, empty payload).
      */
@@ -738,12 +751,14 @@ class BluetoothAncService : Service() {
         const val ACTION_AMBIENT = "$PACKAGE.action.AMBIENT"
         const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
         const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
+        const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"
+        const val EXTRA_EQ_PRESET = "eq_preset"
 
         // Status broadcast
         const val STATUS_BROADCAST = "$PACKAGE.STATUS"

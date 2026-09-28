@@ -6,7 +6,7 @@
     android:orientation="vertical"
     android:background="@color/dark_gray">
 
-    <!-- ===== Tab Bar ===== -->
+    <!-- ===== Tab Bar (3 tabs) ===== -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="48dp"
@@ -23,6 +23,7 @@
             android:gravity="center"
             android:text="Dashboard"
             android:textSize="15sp"
+            android:textStyle="bold"
             android:textColor="@color/on_surface"
             android:paddingVertical="12dp" />
 
@@ -36,9 +37,19 @@
             android:textSize="15sp"
             android:textColor="#FF888888"
             android:paddingVertical="12dp" />
+
+        <TextView
+            android:id="@+id/tabEQ"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="match_parent"
+            android:gravity="center"
+            android:text="EQ"
+            android:textSize="15sp"
+            android:textColor="#FF888888"
+            android:paddingVertical="12dp" />
     </LinearLayout>
 
-    <!-- ===== Scrollable content area ===== -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
@@ -50,14 +61,13 @@
             android:layout_height="wrap_content"
             android:orientation="vertical">
 
-            <!-- ============ DASHBOARD TAB ============ -->
+            <!-- ============ DASHBOARD ============ -->
             <LinearLayout
                 android:id="@+id/dashboardContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
-                <!-- Headphone Info Card -->
                 <com.google.android.material.card.MaterialCardView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -140,7 +150,6 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <!-- Toggle button -->
                 <Button
                     android:id="@+id/btnToggle"
                     android:layout_width="match_parent"
@@ -151,7 +160,6 @@
                     android:enabled="false"
                     android:layout_marginBottom="12dp" />
 
-                <!-- Quick mode buttons -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -190,9 +198,18 @@
                         android:layout_marginStart="4dp" />
                 </LinearLayout>
 
+                <TextView
+                    android:id="@+id/textVersion"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:paddingVertical="8dp"
+                    android:textSize="11sp"
+                    android:textColor="#FF666666"
+                    android:text="v?" />
             </LinearLayout>
 
-            <!-- ============ SETTINGS TAB ============ -->
+            <!-- ============ SETTINGS ============ -->
             <LinearLayout
                 android:id="@+id/settingsContent"
                 android:layout_width="match_parent"
@@ -200,14 +217,13 @@
                 android:orientation="vertical"
                 android:visibility="gone">
 
-                <!-- Device -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Device"
-                    android:textSize="16sp"
+                    android:text="DEVICE"
+                    android:textSize="11sp"
                     android:textStyle="bold"
-                    android:textColor="@color/on_surface"
+                    android:textColor="#FF888888"
                     android:paddingBottom="8dp" />
 
                 <LinearLayout
@@ -244,16 +260,16 @@
                     android:textSize="12sp"
                     android:textColor="#FF888888"
                     android:text="Protocol: auto-detect"
-                    android:layout_marginBottom="12dp" />
+                    android:layout_marginBottom="20dp" />
 
-                <!-- Ambient -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Ambient level:"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface"
-                    android:paddingTop="8dp" />
+                    android:text="AMBIENT"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingBottom="8dp" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -283,7 +299,7 @@
                     android:id="@+id/switchVoice"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Focus on voice (voice passthrough)"
+                    android:text="Voice passthrough"
                     android:textColor="@color/on_surface"
                     android:paddingVertical="4dp" />
 
@@ -295,14 +311,15 @@
                     android:textColor="@color/on_surface"
                     android:paddingVertical="4dp" />
 
-                <!-- App filter -->
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Trigger apps:"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface"
-                    android:paddingTop="12dp" />
+                    android:text="TRIGGER APPS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="16dp"
+                    android:paddingBottom="8dp" />
 
                 <Switch
                     android:id="@+id/switchAllowlist"
@@ -339,28 +356,149 @@
                     android:layout_marginTop="4dp" />
             </LinearLayout>
 
-            <!-- ===== Info + Version (always visible) ===== -->
-            <TextView
+            <!-- ============ EQ TAB ============ -->
+            <LinearLayout
+                android:id="@+id/eqContent"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:padding="12dp"
-                android:background="@color/surface"
-                android:textColor="#FFBBBBBB"
-                android:textSize="12sp"
-                android:lineSpacingExtra="4dp"
-                android:layout_marginTop="16dp"
-                android:text="@string/info_text" />
+                android:orientation="vertical"
+                android:visibility="gone">
 
-            <TextView
-                android:id="@+id/textVersion"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:gravity="center"
-                android:paddingTop="12dp"
-                android:paddingBottom="8dp"
-                android:textSize="11sp"
-                android:textColor="#FF666666"
-                android:text="v?" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="PRESETS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingBottom="12dp" />
+
+                <TextView
+                    android:id="@+id/textEQStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="13sp"
+                    android:textColor="#FFAAAAAA"
+                    android:text="Select a preset — applies immediately"
+                    android:paddingBottom="16dp" />
+
+                <!-- Preset buttons grid: 2 columns -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <Button
+                        android:id="@+id/btnEQOff"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Off"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnEQHeavy"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Heavy"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <Button
+                        android:id="@+id/btnEQClear"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Clear"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnEQHard"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Hard"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:layout_marginBottom="8dp">
+
+                    <Button
+                        android:id="@+id/btnEQSoft"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Soft"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnEQCustom"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="Custom"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnEQUser1"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="User 1"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginEnd="4dp" />
+
+                    <Button
+                        android:id="@+id/btnEQUser2"
+                        android:layout_width="0dp"
+                        android:layout_weight="1"
+                        android:layout_height="48dp"
+                        android:text="User 2"
+                        android:textColor="@android:color/white"
+                        android:backgroundTint="#FF555555"
+                        android:layout_marginStart="4dp" />
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center"
+                    android:paddingTop="16dp"
+                    android:textSize="11sp"
+                    android:textColor="#FF666666"
+                    android:text="Service must be running to apply EQ" />
+            </LinearLayout>
         </LinearLayout>
     </ScrollView>
 </LinearLayout>

@@ -7,10 +7,11 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
-import android.graphics.Color
 import android.view.View
+import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,6 +30,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_OFF
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_PRESET
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
 
 class MainActivity : AppCompatActivity() {
@@ -44,9 +47,7 @@ class MainActivity : AppCompatActivity() {
     private var battery: Int? = null
     private var currentMode = "—"
     private var selectedAddress: String? = null
-
-    // Tab state
-    private var showingDashboard = true
+    private var showingTab = 0 // 0=Dashboard, 1=Settings, 2=EQ
 
     private val requiredPermissions = mutableListOf<String>().apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -66,8 +67,6 @@ class MainActivity : AppCompatActivity() {
         if (hasAllPermissions()) scanDevices()
         else Toast.makeText(this, "Bluetooth permissions required", Toast.LENGTH_LONG).show()
     }
-
-    // ---- Status receiver (updates Dashboard card) ----
 
     private val statusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -97,8 +96,9 @@ class MainActivity : AppCompatActivity() {
         )
 
         // Tab listeners
-        binding.tabDashboard.setOnClickListener { switchTab(true) }
-        binding.tabSettings.setOnClickListener { switchTab(false) }
+        binding.tabDashboard.setOnClickListener { switchTab(0) }
+        binding.tabSettings.setOnClickListener { switchTab(1) }
+        binding.tabEQ.setOnClickListener { switchTab(2) }
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
@@ -110,8 +110,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnRefresh.setOnClickListener { onRefreshClicked() }
         binding.btnChooseApps.setOnClickListener { showAppPicker() }
         binding.btnNotifAccess.setOnClickListener { openNotifAccessSettings() }
-
-        // SeekBar
         binding.seekLevel.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(seek: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
                 binding.textLevelValue.text = (v + 1).toString()
@@ -120,23 +118,26 @@ class MainActivity : AppCompatActivity() {
             override fun onStartTrackingTouch(seek: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(seek: android.widget.SeekBar?) {}
         })
-
         binding.switchVoice.setOnCheckedChangeListener { _, checked -> saveSetting("voice_passthrough", checked) }
         binding.switchAutoAmbient.setOnCheckedChangeListener { _, checked -> saveSetting("auto_ambient", checked) }
-
         binding.switchAllowlist.setOnCheckedChangeListener { _, checked ->
-            getSharedPreferences("anc_settings", MODE_PRIVATE).edit()
-                .putBoolean("allowlist_enabled", checked).apply()
+            getSharedPreferences("anc_settings", MODE_PRIVATE).edit().putBoolean("allowlist_enabled", checked).apply()
             updateSelectedAppsText()
         }
-
-        // Device spinner selection — load settings for that device
-        binding.spinnerDevice.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: View?, position: Int, id: Long) {
-                loadDeviceSettings()
-            }
-            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        binding.spinnerDevice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
         }
+
+        // EQ
+        binding.btnEQOff.setOnClickListener { sendEQ(0x00) }
+        binding.btnEQHeavy.setOnClickListener { sendEQ(0x30) }
+        binding.btnEQClear.setOnClickListener { sendEQ(0x31) }
+        binding.btnEQHard.setOnClickListener { sendEQ(0x32) }
+        binding.btnEQSoft.setOnClickListener { sendEQ(0x33) }
+        binding.btnEQCustom.setOnClickListener { sendEQ(0xA0) }
+        binding.btnEQUser1.setOnClickListener { sendEQ(0xA1) }
+        binding.btnEQUser2.setOnClickListener { sendEQ(0xA2) }
 
         binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
         updateServiceRunning(BluetoothAncService.isRunning)
@@ -150,16 +151,21 @@ class MainActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    // ---- Tab switching ----
+    // ---- 3-tab switching ----
 
-    private fun switchTab(dashboard: Boolean) {
-        showingDashboard = dashboard
-        binding.dashboardContent.visibility = if (dashboard) View.VISIBLE else View.GONE
-        binding.settingsContent.visibility = if (dashboard) View.GONE else View.VISIBLE
-        val activeColor = Color.argb(255, 224, 224, 224)  // on_surface
-        val mutedColor = Color.argb(255, 136, 136, 136)    // dimmed
-        binding.tabDashboard.setTextColor(if (dashboard) activeColor else mutedColor)
-        binding.tabSettings.setTextColor(if (dashboard) mutedColor else activeColor)
+    private fun switchTab(tab: Int) {
+        showingTab = tab
+        binding.dashboardContent.visibility = if (tab == 0) View.VISIBLE else View.GONE
+        binding.settingsContent.visibility = if (tab == 1) View.VISIBLE else View.GONE
+        binding.eqContent.visibility = if (tab == 2) View.VISIBLE else View.GONE
+
+        val active = Color.rgb(224, 224, 224)
+        val muted = Color.rgb(136, 136, 136)
+        val tabs = listOf(binding.tabDashboard, binding.tabSettings, binding.tabEQ)
+        for (i in tabs.indices) {
+            tabs[i].setTextColor(if (i == tab) active else muted)
+            tabs[i].setTypeface(null, if (i == tab) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+        }
     }
 
     // ---- Per-device settings ----
@@ -176,16 +182,12 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
         binding.switchAllowlist.isChecked = prefs.getBoolean("allowlist_enabled", false)
         updateSelectedAppsText()
-
-        // Show detection info
         val name = pairedDevices.find { it.address == addr }?.name ?: ""
-        val profileName = HeadphoneProfile.detect(name).modelName
-        binding.textProfile.text = "Protocol: ${profileName} profile"
+        binding.textProfile.text = "Protocol: ${HeadphoneProfile.detect(name).modelName}"
     }
 
     private fun saveSetting(key: String, value: Any) {
-        val addr = selectedAddress
-        if (addr == null) return
+        val addr = selectedAddress ?: return
         val e = getSharedPreferences("anc_settings", MODE_PRIVATE).edit()
         when (value) {
             is Int -> e.putInt("${key}_$addr", value)
@@ -194,7 +196,7 @@ class MainActivity : AppCompatActivity() {
         e.apply()
     }
 
-    // ---- App allowlist (global) ----
+    // ---- App allowlist ----
 
     private fun allApps(): List<Pair<String, String>> {
         val pm = packageManager
@@ -216,7 +218,6 @@ class MainActivity : AppCompatActivity() {
         val prefs = getSharedPreferences("anc_settings", MODE_PRIVATE)
         val current = prefs.getStringSet("allowlist_apps", emptySet()) ?: emptySet()
         val checked = BooleanArray(apps.size) { apps[it].second in current }
-
         AlertDialog.Builder(this)
             .setTitle("Apps that trigger ANC")
             .setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
@@ -225,8 +226,7 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putStringSet("allowlist_apps", selected).apply()
                 updateSelectedAppsText()
             }
-            .setNegativeButton("Cancel", null)
-            .show()
+            .setNegativeButton("Cancel", null).show()
     }
 
     private fun updateSelectedAppsText() {
@@ -234,8 +234,8 @@ class MainActivity : AppCompatActivity() {
         val selected = prefs.getStringSet("allowlist_apps", emptySet()) ?: emptySet()
         val enabled = prefs.getBoolean("allowlist_enabled", false)
         binding.textSelectedApps.text = when {
-            !enabled -> "Filtering disabled — any app triggers"
-            selected.isEmpty() -> "No apps selected — nothing triggers"
+            !enabled -> "App filtering disabled"
+            selected.isEmpty() -> "No apps — nothing triggers"
             else -> selected.joinToString("\n")
         }
     }
@@ -245,15 +245,22 @@ class MainActivity : AppCompatActivity() {
         catch (e: Exception) { Toast.makeText(this, "Couldn't open notification settings", Toast.LENGTH_SHORT).show() }
     }
 
-    // ---- Quick mode buttons ----
+    // ---- Quick mode + EQ ----
 
     private fun sendQuickAction(action: String) {
-        if (!BluetoothAncService.isRunning) {
-            Toast.makeText(this, "Start the service first", Toast.LENGTH_SHORT).show()
-            return
-        }
-        Intent(this, BluetoothAncService::class.java).apply { this.action = action }
-            .also { startService(it) }
+        if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start the service first", Toast.LENGTH_SHORT).show(); return }
+        Intent(this, BluetoothAncService::class.java).apply { this.action = action }.also { startService(it) }
+    }
+
+    private fun sendEQ(presetId: Int) {
+        if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start the service first", Toast.LENGTH_SHORT).show(); return }
+        val preset = EQPreset.fromId(presetId)
+        binding.textEQStatus.text = "Applying ${preset.displayName}…"
+        Intent(this, BluetoothAncService::class.java).apply {
+            action = ACTION_SET_EQ
+            putExtra(EXTRA_EQ_PRESET, presetId)
+        }.also { startService(it) }
+        Toast.makeText(this, "EQ: ${preset.displayName}", Toast.LENGTH_SHORT).show()
     }
 
     // ---- Permissions ----
@@ -281,18 +288,15 @@ class MainActivity : AppCompatActivity() {
             val name = device.name ?: ""
             if (name.contains("WH-1000XM", ignoreCase = true)) pairedDevices.add(DeviceInfo(name, device.address))
         }
-
         if (pairedDevices.isEmpty()) {
-            binding.textModel.text = "No WH-1000XM devices"
+            binding.textModel.text = "No headphones"
             updateCardStatus("🔍 Pair in Settings → Bluetooth")
             binding.btnToggle.isEnabled = false
         } else {
-            val first = pairedDevices.first()
-            binding.textModel.text = first.name
+            binding.textModel.text = pairedDevices.first().name
             updateCardStatus("${pairedDevices.size} device(s)")
             binding.btnToggle.isEnabled = true
         }
-
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerDevice.adapter = listAdapter
@@ -302,8 +306,7 @@ class MainActivity : AppCompatActivity() {
     // ---- Service toggle ----
 
     private fun onToggleClicked() {
-        if (serviceRunning) stopService()
-        else startService()
+        if (serviceRunning) stopService() else startService()
     }
 
     private fun onRefreshClicked() {
@@ -311,17 +314,13 @@ class MainActivity : AppCompatActivity() {
         scanDevices()
         updateServiceRunning(BluetoothAncService.isRunning)
         if (BluetoothAncService.isRunning) {
-            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_GET_STATUS }
-                .also { startService(it) }
+            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_GET_STATUS }.also { startService(it) }
         }
     }
 
     private fun startService() {
         val pos = binding.spinnerDevice.selectedItemPosition
-        if (pos < 0 || pos >= pairedDevices.size) {
-            Toast.makeText(this, "Select a device first", Toast.LENGTH_SHORT).show()
-            return
-        }
+        if (pos < 0 || pos >= pairedDevices.size) { Toast.makeText(this, "Select a device first", Toast.LENGTH_SHORT).show(); return }
         if (!hasAllPermissions()) { permissionLauncher.launch(requiredPermissions); return }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -332,29 +331,25 @@ class MainActivity : AppCompatActivity() {
             action = ACTION_START
             putExtra(EXTRA_ADDRESS, device.address)
         }.also {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it)
-            else startService(it)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it) else startService(it)
         }
         updateServiceRunning(true)
         updateCardStatus("🔄 Starting…")
     }
 
     private fun stopService() {
-        Intent(this, BluetoothAncService::class.java).apply { action = ACTION_STOP }
-            .also { startService(it) }
+        Intent(this, BluetoothAncService::class.java).apply { action = ACTION_STOP }.also { startService(it) }
         updateServiceRunning(false)
         updateCardStatus("⏹ Stopped")
     }
 
-    // ---- Dashboard card updates ----
+    // ---- Dashboard card ----
 
     private fun updateServiceRunning(running: Boolean) {
         serviceRunning = running
         binding.btnToggle.text = if (running) "Stop Service" else "Start Service"
         binding.btnToggle.setBackgroundColor(ContextCompat.getColor(this,
             if (running) android.R.color.holo_red_dark else android.R.color.holo_green_dark))
-        binding.spinnerDevice.isEnabled = !running
-        binding.btnRefresh.isEnabled = !running
     }
 
     private fun updateStatusDisplay(status: BluetoothAncService.Status, message: String? = null) {
