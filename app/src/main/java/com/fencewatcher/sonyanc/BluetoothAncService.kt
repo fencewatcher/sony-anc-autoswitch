@@ -40,6 +40,7 @@ class BluetoothAncService : Service() {
     private var currentModeName: String = "—"
     @Volatile
     private var autoPaused = false
+    private var profile: HeadphoneProfile = HeadphoneProfile.Xm6
 
     // ---- Lifecycle ----
 
@@ -82,7 +83,7 @@ class BluetoothAncService : Service() {
 
                 ACTION_ANC_ON -> {
                     Log.d(tag, "Debug: manual ANC ON")
-                    scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_ON) }
+                    scope.launch { sendAncCommandOnce(profile.ancOn(ambientLevel())) }
                 }
 
                 ACTION_AMBIENT -> {
@@ -92,7 +93,7 @@ class BluetoothAncService : Service() {
 
                 ACTION_ANC_OFF -> {
                     Log.d(tag, "Debug: manual ANC OFF")
-                    scope.launch { sendAncCommandOnce(SonyAncProtocol.ANC_OFF) }
+                    scope.launch { sendAncCommandOnce(profile.ancOff(ambientLevel())) }
                 }
 
                 ACTION_TOGGLE_AUTO -> {
@@ -145,11 +146,20 @@ class BluetoothAncService : Service() {
 
     private fun prefs() = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
 
-    private fun ambientLevel(): Int =
-        prefs().getInt(KEY_AMBIENT_LEVEL, 20).coerceIn(1, 20)
+    private fun ambientLevel(): Int {
+        val addr = deviceAddress ?: return 20
+        return prefs().getInt("ambient_level_$addr", 20).coerceIn(1, 20)
+    }
 
-    private fun voicePassthrough(): Boolean =
-        prefs().getBoolean(KEY_VOICE_PASSTHROUGH, false)
+    private fun voicePassthrough(): Boolean {
+        val addr = deviceAddress ?: return false
+        return prefs().getBoolean("voice_passthrough_$addr", false)
+    }
+
+    private fun autoAmbient(): Boolean {
+        val addr = deviceAddress ?: return false
+        return prefs().getBoolean("auto_ambient_$addr", false)
+    }
 
     private fun allowlistEnabled(): Boolean =
         prefs().getBoolean(KEY_ALLOWLIST_ENABLED, false)
@@ -158,11 +168,10 @@ class BluetoothAncService : Service() {
         prefs().getStringSet(KEY_ALLOWLIST, emptySet()) ?: emptySet()
 
     private fun sonyAmbientCommand(): ByteArray {
-        val p = prefs()
-        return SonyAncProtocol.ambient(
-            level = p.getInt(KEY_AMBIENT_LEVEL, 20),
-            voice = p.getBoolean(KEY_VOICE_PASSTHROUGH, false),
-            noiseAdaptive = p.getBoolean(KEY_AMBIENT_NOISE_ADAPTIVE, false),
+        return profile.ambient(
+            level = ambientLevel(),
+            voice = voicePassthrough(),
+            noiseAdaptive = autoAmbient(),
         )
     }
 
@@ -214,7 +223,9 @@ class BluetoothAncService : Service() {
 
                     val device: BluetoothDevice = adapter.getRemoteDevice(address)
 
-                    // Close stale socket
+                    // Detect headphone model from device name
+                    profile = HeadphoneProfile.detect(device.name ?: "")
+                    Log.d(tag, "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)")
                     try {
                         btSocket?.close()
                     } catch (_: Exception) {}
@@ -255,8 +266,8 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Handshake: battery")
                     sendFrame(byteArrayOf(0x22, 0x00))
                     delay(100L)
-                    Log.d(tag, "Handshake: XM6 ANC inquiry (0x66 0x19)")
-                    sendFrame(byteArrayOf(0x66, 0x19))
+                    Log.d(tag, "Handshake: XM6 ANC inquiry (${profile.ancInquiry.joinToString(" ") { "%02x".format(it) }})")
+                    sendFrame(profile.ancInquiry)
                     delay(100L)
                     Log.d(tag, "Handshake: EQ")
                     sendFrame(byteArrayOf(0x56, 0x00))
@@ -379,63 +390,35 @@ class BluetoothAncService : Service() {
      * so we fall back to reflection-based channel 1.
      */
     private fun createSonyRfcommSocket(device: BluetoothDevice): BluetoothSocket {
-        val uuid = UUID.fromString(SERVICE_UUID)
-
-        // Strategy 1: standard UUID lookup (works on some phones)
-        try {
-            val s = device.createRfcommSocketToServiceRecord(uuid)
-            Log.d(tag, "Socket created via UUID")
-            return s
-        } catch (e: IOException) {
-            Log.w(tag, "UUID socket failed: ${e.message}")
-        }
-
-        // Strategy 2: insecure UUID variant (helps on some Samsung/OnePlus)
-        try {
-            val s = device.createInsecureRfcommSocketToServiceRecord(uuid)
-            Log.d(tag, "Socket created via insecure UUID")
-            return s
-        } catch (e: IOException) {
-            Log.w(tag, "Insecure UUID socket failed: ${e.message}")
-        }
-
-        // Strategy 3: reflection — createRfcommSocket(channel) with channel 1
-        // This is the Sony-recommended fallback used by Gadgetbridge
-        try {
-            val method = device.javaClass.getMethod(
-                "createRfcommSocket", Int::class.java
-            )
-            val s = method.invoke(device, 1) as BluetoothSocket
-            Log.d(tag, "Socket created via reflection (channel 1)")
-            return s
-        } catch (e: Exception) {
-            Log.w(tag, "Reflection socket failed: ${e.message}")
-        }
-
-        // Strategy 4: try reflection with channel 10 (some devices use this)
-        try {
-            val method = device.javaClass.getMethod(
-                "createRfcommSocket", Int::class.java
-            )
-            val s = method.invoke(device, 10) as BluetoothSocket
-            Log.d(tag, "Socket created via reflection (channel 10)")
-            return s
-        } catch (e: Exception) {
-            Log.w(tag, "Reflection channel-10 failed: ${e.message}")
-        }
-
-        // Strategy 5: try reflection with channel 2, 3, 5, 15, 20
-        val extraChannels = intArrayOf(2, 3, 5, 15, 20)
-        for (ch in extraChannels) {
+        // Try known Sony service UUIDs (in order: XM6, XM5) first
+        for (uuidStr in HeadphoneProfile.allUuids) {
+            val uuid = UUID.fromString(uuidStr)
             try {
-                val method = device.javaClass.getMethod(
-                    "createRfcommSocket", Int::class.java
-                )
+                val s = device.createRfcommSocketToServiceRecord(uuid)
+                Log.d(tag, "Socket created via UUID $uuidStr")
+                return s
+            } catch (e: IOException) {
+                Log.d(tag, "UUID $uuidStr failed: ${e.message}")
+            }
+            try {
+                val s = device.createInsecureRfcommSocketToServiceRecord(uuid)
+                Log.d(tag, "Socket created via insecure UUID")
+                return s
+            } catch (e: IOException) {
+                Log.d(tag, "Insecure UUID $uuidStr failed: ${e.message}")
+            }
+        }
+
+        // Fallback: reflection with channel 1, 10, etc.
+        val channels = intArrayOf(1, 10, 2, 3, 5, 15, 20)
+        for (ch in channels) {
+            try {
+                val method = device.javaClass.getMethod("createRfcommSocket", Int::class.java)
                 val s = method.invoke(device, ch) as BluetoothSocket
                 Log.d(tag, "Socket created via reflection (channel $ch)")
                 return s
             } catch (e: Exception) {
-                Log.w(tag, "Reflection channel-$ch failed: ${e.message}")
+                Log.d(tag, "Reflection channel-$ch failed: ${e.message}")
             }
         }
 
@@ -463,7 +446,11 @@ class BluetoothAncService : Service() {
 
     /** Sends NC when media is playing, configured ambient otherwise. */
     private fun sendCommandForPlaybackState() {
-        val cmd = if (isMediaPlaying) SonyAncProtocol.ANC_ON else sonyAmbientCommand()
+        val cmd = if (isMediaPlaying) {
+            profile.ancOn(ambientLevel())
+        } else {
+            sonyAmbientCommand()
+        }
         sendFrame(cmd)
     }
 
@@ -472,7 +459,7 @@ class BluetoothAncService : Service() {
      * so a single frame is enough. Uses [sendFrame] to keep it simple.
      */
     private fun sendAncCommandOnce(payload: ByteArray) {
-        Log.d(tag, "Single: ${SonyAncProtocol.describe(payload)} — ${SonyAncProtocol.describePayload(payload)}")
+        Log.d(tag, "Single: ${profile.describe(payload)} — ${SonyAncProtocol.describePayload(payload)}")
         sendFrame(payload)
     }
 
@@ -491,7 +478,7 @@ class BluetoothAncService : Service() {
 
             // Track the mode we last commanded (for notification stats)
             if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == 0x68) {
-                currentModeName = SonyAncProtocol.describe(payload)
+                currentModeName = profile.describe(payload)
             }
         } catch (e: Exception) {
             Log.w(tag, "Frame send failed: ${e.message}")
@@ -741,7 +728,7 @@ class BluetoothAncService : Service() {
         var isRunning = false
 
         // Service UUID from Gadgetbridge reverse-engineering
-        const val SERVICE_UUID = "956c7b26-d49a-4ba8-b03f-b17d393cb6e2"
+        // Service UUIDs — now managed by HeadphoneProfile.allUuids
 
         // Intent actions
         const val ACTION_START = "$PACKAGE.action.START"
