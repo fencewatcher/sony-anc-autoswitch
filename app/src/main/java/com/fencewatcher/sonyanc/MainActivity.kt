@@ -371,9 +371,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             binding.textModel.text = pairedDevices.first().name; updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
         }
-        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerDevice.adapter = adapter
+        val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
+        listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerDevice.adapter = listAdapter
         loadDeviceSettings()
     }
 
