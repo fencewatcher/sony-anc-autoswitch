@@ -120,6 +120,33 @@ object SonyAncProtocol {
         if (payload.size < 3 || payload[1].toInt() and 0xFF != 0x01) return null
         return payload[2].toInt() and 0xFF == 0x00
     }
+
+    // ---- Power off (0x24 0x03 0x01) ----
+
+    fun buildPowerOff(): ByteArray = byteArrayOf(0x24, 0x03, 0x01)
+
+    // ---- Touch sensor enable/disable (0xD8 family) ----
+
+    fun buildTouchSensorSet(enabled: Boolean): ByteArray =
+        byteArrayOf(0xD8.toByte(), 0x01, if (enabled) 0x01 else 0x00, 0x00)
+
+    fun buildTouchSensorGet(): ByteArray = byteArrayOf(0xD6.toByte(), 0x01)
+
+    fun decodeTouchSensor(payload: ByteArray): Boolean? {
+        if (payload.size < 3 || payload[1].toInt() and 0xFF != 0x01) return null
+        return payload[2].toInt() and 0xFF == 0x01
+    }
+
+    // ---- Voice guidance volume (0x68 family, inquired type 0x0D) ----
+
+    fun buildVoiceGuidanceGet(): ByteArray = byteArrayOf(0x66, 0x0D)
+    fun buildVoiceGuidanceSet(volume: Int): ByteArray =
+        byteArrayOf(0x68, 0x0D, volume.coerceIn(0, 15).toByte())
+
+    fun decodeVoiceGuidance(payload: ByteArray): Int? {
+        if (payload.size < 3 || payload[1].toInt() and 0xFF != 0x0D) return null
+        return payload[2].toInt() and 0xFF
+    }
 }
 
 /** A device in the headphones' multipoint connection list. */

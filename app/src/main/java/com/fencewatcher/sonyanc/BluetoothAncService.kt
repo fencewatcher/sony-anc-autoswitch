@@ -117,6 +117,34 @@ class BluetoothAncService : Service() {
                         scope.launch { setCustomEQ(bands, presetId) }
                     }
                 }
+
+                ACTION_POWER_OFF -> {
+                    Log.d(tag, "Power-off command")
+                    scope.launch {
+                        sendFrame(SonyAncProtocol.buildPowerOff())
+                    }
+                }
+
+                ACTION_REFRESH_DEVICES -> {
+                    Log.d(tag, "Refreshing multipoint device list")
+                    scope.launch {
+                        sendFrame(SonyAncProtocol.buildDeviceListGet(), type = 0x0E)
+                    }
+                }
+
+                ACTION_SET_AUTO_POWER -> {
+                    val mode = intent.getByteExtra("mode", 0x10)
+                    scope.launch {
+                        sendFrame(SonyAncProtocol.buildAutoPowerOffSet(mode))
+                    }
+                }
+
+                ACTION_SET_TOUCH -> {
+                    val enabled = intent.getBooleanExtra("enabled", true)
+                    scope.launch {
+                        sendFrame(SonyAncProtocol.buildTouchSensorSet(enabled))
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -518,10 +546,10 @@ class BluetoothAncService : Service() {
      * Send arbitrary payload bytes wrapped in an MDR frame, used for
      * protocol handshake commands.
      */
-    private fun sendFrame(payload: ByteArray) {
+    private fun sendFrame(payload: ByteArray, type: Int = 0x0C) {
         val socket = btSocket ?: return
         try {
-            val frame = SonyAncProtocol.buildFrame(currentSeq, payload)
+            val frame = SonyAncProtocol.buildFrame(currentSeq, payload, type)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
             Log.d(tag, "Frame ${payload.joinToString(" ") { "%02x".format(it) }} seq=$currentSeq")
@@ -831,6 +859,10 @@ class BluetoothAncService : Service() {
         const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"
         const val ACTION_SET_EQ_CUSTOM = "$PACKAGE.action.SET_EQ_CUSTOM"
+        const val ACTION_POWER_OFF = "$PACKAGE.action.POWER_OFF"
+        const val ACTION_REFRESH_DEVICES = "$PACKAGE.action.REFRESH_DEVICES"
+        const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
+        const val ACTION_SET_TOUCH = "$PACKAGE.action.SET_TOUCH"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"

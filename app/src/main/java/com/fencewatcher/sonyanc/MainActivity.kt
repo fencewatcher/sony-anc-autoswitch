@@ -36,6 +36,10 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ_CUSTOM
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_POWER_OFF
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_TOUCH
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_BANDS
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
@@ -152,6 +156,38 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQUser1.setOnClickListener { selectEditablePreset(0xA1, "User 1") }
         binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2, "User 2") }
         binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
+
+        // Power Off
+        binding.btnPowerOff.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            sendToService(ACTION_POWER_OFF) {}
+            Toast.makeText(this, "⏻ Power-off sent", Toast.LENGTH_SHORT).show()
+        }
+
+        // Multipoint
+        binding.btnRefreshDevices.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
+            sendToService(ACTION_REFRESH_DEVICES) {}
+            Toast.makeText(this, "↻ Refreshing…", Toast.LENGTH_SHORT).show()
+        }
+
+        // Touch sensor
+        binding.switchTouch.setOnCheckedChangeListener { _, checked ->
+            if (BluetoothAncService.isRunning) sendToService(ACTION_SET_TOUCH) { putExtra("enabled", checked) }
+        }
+
+        // Auto power-off spinner
+        val powerModes = arrayOf("When taken off", "5 min", "15 min", "30 min", "60 min", "3 hours", "Never")
+        val powerModeIds = byteArrayOf(0x10, 0x00, 0x04, 0x01, 0x02, 0x03, 0x11)
+        binding.spinnerAutoPower.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, powerModes).also {
+            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerAutoPower.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (BluetoothAncService.isRunning) sendToService(ACTION_SET_AUTO_POWER) { putExtra("mode", powerModeIds[pos].toInt()) }
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
 
         // EQ graph callbacks
         binding.eqGraph.onBandChanged = { index, value ->
