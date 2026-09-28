@@ -30,6 +30,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_OFF
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ_CUSTOM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_BANDS
