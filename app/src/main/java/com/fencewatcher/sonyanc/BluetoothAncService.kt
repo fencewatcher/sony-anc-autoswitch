@@ -713,7 +713,8 @@ class BluetoothAncService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val notification = buildNotification(text)
+        val displayText = if (autoPaused) "⏸ Auto-paused" else text
+        val notification = buildNotification(displayText)
         try {
             notificationManager.notify(NOTIFICATION_ID, notification)
         } catch (_: Exception) {
