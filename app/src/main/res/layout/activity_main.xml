@@ -521,11 +521,11 @@
                         android:textColor="#FF888888"
                         android:paddingBottom="8dp" />
 
-                    <LinearLayout
-                        android:id="@+id/eqBandsContainer"
+                    <com.fencewatcher.sonyanc.EQGraphView
+                        android:id="@+id/eqGraph"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical" />
+                        android:layout_marginTop="4dp" />
 
                     <Button
                         android:id="@+id/btnApplyCustomEQ"

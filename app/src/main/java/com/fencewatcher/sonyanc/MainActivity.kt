@@ -57,9 +57,7 @@ class MainActivity : AppCompatActivity() {
     private var showingTab = 0
 
     // EQ state
-    private val eqBandLabels = arrayOf("31", "63", "125", "250", "500", "1k", "2k", "4k", "8k", "16k")
     private val eqBandValues = IntArray(10) { 0 }
-    private var slidersInitialized = false
     private var selectedEQProfile = 0xA0 // 0xA0=Custom, 0xA1=User1, 0xA2=User2
     private var eqActivePreset = 0
     private var eqActiveBands: IntArray? = null
@@ -95,7 +93,12 @@ class MainActivity : AppCompatActivity() {
                 eqActivePreset = intent.getIntExtra(EXTRA_EQ_ACTIVE_PRESET, 0)
                 eqActiveBands = intent.getIntArrayExtra(EXTRA_EQ_ACTIVE_BANDS)
                 updateEQStatus()
-                populateEQSliders()
+                // Sync graph view
+                val src = eqActiveBands
+                if (src != null && src.size == 10) {
+                    for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
+                    binding.eqGraph.bandValues = eqBandValues
+                }
             }
         }
     }
@@ -150,6 +153,11 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2, "User 2") }
         binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
 
+        // EQ graph callbacks
+        binding.eqGraph.onBandChanged = { index, value ->
+            eqBandValues[index] = value
+        }
+
         binding.textVersion.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_HASH})"
         updateServiceRunning(BluetoothAncService.isRunning)
         if (hasAllPermissions()) scanDevices()
@@ -174,7 +182,7 @@ class MainActivity : AppCompatActivity() {
             t.setTextColor(if (i == tab) active else muted)
             t.setTypeface(null, if (i == tab) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
         }
-        if (tab == 2 && slidersInitialized) populateEQSliders()
+        if (tab == 2) binding.eqGraph.bandValues = eqBandValues
     }
 
     // ---- EQ ----
@@ -185,7 +193,7 @@ class MainActivity : AppCompatActivity() {
         binding.textEQStatus.text = "↻ ${preset.displayName}"
         selectedEQProfile = presetId
         sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, presetId) }
-        setEQBandInteraction(false)  // disable sliders for built-in presets
+        binding.eqGraph.interactive = false
         binding.btnApplyCustomEQ.visibility = View.GONE
         Handler(Looper.getMainLooper()).postDelayed({
             binding.textEQStatus.text = "✅ ${preset.displayName}"
@@ -194,21 +202,23 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectEditablePreset(profileId: Int, label: String) {
         selectedEQProfile = profileId
+        // Sync current eqBandValues to graph
+        binding.eqGraph.bandValues = eqBandValues
         if (BluetoothAncService.isRunning) {
-            binding.textEQStatus.text = "↻ $label — drag sliders then tap Write"
+            binding.textEQStatus.text = "↻ $label — drag curve then Write"
             sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, profileId) }
         }
-        populateEQSliders()
-        setEQBandInteraction(true)
+        binding.eqGraph.interactive = true
         binding.btnApplyCustomEQ.visibility = View.VISIBLE
         binding.btnApplyCustomEQ.text = "Write to $label"
     }
 
     private fun applyCustomEQ() {
         if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
+        // Read values from graph view for Apply
         val presetName = EQPreset.fromId(selectedEQProfile).displayName
         binding.textEQStatus.text = "↻ Writing $presetName..."
-        sendToService(ACTION_SET_EQ_CUSTOM) { putExtra(EXTRA_EQ_BANDS, eqBandValues) }
+        sendToService(ACTION_SET_EQ_CUSTOM) { putExtra(EXTRA_EQ_BANDS, binding.eqGraph.bandValues) }
         Handler(Looper.getMainLooper()).postDelayed({
             if (binding.textEQStatus.text.startsWith("↻")) updateEQStatus()
         }, 3000)
@@ -221,66 +231,6 @@ class MainActivity : AppCompatActivity() {
             "✅ ${preset.displayName} [${bands.joinToString(" ") { "%+d".format(it) }}]"
         } else {
             "✅ ${preset.displayName}"
-        }
-    }
-
-    private fun populateEQSliders() {
-        slidersInitialized = true
-        val container = binding.eqBandsContainer
-        container.removeAllViews()
-        val source = eqActiveBands
-        if (source != null && source.size == 10) {
-            for (i in 0..9) eqBandValues[i] = source[i].coerceIn(-6, 6)
-        }
-        for (i in eqBandLabels.indices) {
-            val row = android.widget.LinearLayout(this)
-            row.orientation = android.widget.LinearLayout.HORIZONTAL
-            row.gravity = android.view.Gravity.CENTER_VERTICAL
-            row.setPadding(0, 4, 0, 4)
-
-            val labelView = android.widget.TextView(this).apply {
-                text = "${eqBandLabels[i]}Hz"
-                setTextColor(Color.rgb(200, 200, 200))
-                textSize = 12f
-                minWidth = 60
-                gravity = android.view.Gravity.CENTER_VERTICAL
-            }
-
-            val seekBar = android.widget.SeekBar(this)
-            seekBar.max = 12
-            seekBar.progress = eqBandValues[i] + 6
-            seekBar.layoutParams = android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-
-            val valueView = android.widget.TextView(this).apply {
-                text = eqBandValues[i].toString()
-                setTextColor(Color.rgb(170, 170, 170))
-                textSize = 13f
-                minWidth = 30
-                gravity = android.view.Gravity.CENTER
-            }
-
-            seekBar.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
-                    eqBandValues[i] = v - 6
-                    valueView.text = (v - 6).toString()
-                }
-                override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
-                override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
-            })
-
-            row.addView(labelView)
-            row.addView(seekBar)
-            row.addView(valueView)
-            container.addView(row)
-        }
-    }
-
-    private fun setEQBandInteraction(enabled: Boolean) {
-        for (i in 0 until binding.eqBandsContainer.childCount) {
-            val row = binding.eqBandsContainer.getChildAt(i) as? android.widget.LinearLayout ?: continue
-            for (j in 0 until row.childCount) {
-                (row.getChildAt(j) as? android.widget.SeekBar)?.isEnabled = enabled
-            }
         }
     }
 
