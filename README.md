@@ -1,75 +1,80 @@
 # Sony ANC Auto-Switch
 
-Automatically toggles Sony WH-1000XM6/XM5 Noise Cancelling when you play or pause media.
+> Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and **app allowlist**.
 
-**Play media → ANC ON** | **Pause → Ambient mode** | **Stays silent and disconnected → Off**
+**Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
+
+![v1.3](https://img.shields.io/badge/version-1.3-blue)
+
+---
+
+## Features
+
+- **🎵 Auto ANC** — Switches NC/Ambient/Off based on media playback (Spotify, YouTube Music, Podcast Addict, etc.)
+- **🎛️ Visual EQ** — Drag the frequency response curve (10 bands, 31Hz–16kHz, -6..+6 dB)
+  - 8 presets: Off, Heavy, Clear, Hard, Soft, Custom, User 1, User 2
+  - Write custom bands to Custom, User 1, or User 2 slots
+  - EQ state readback from headphones — sliders show the actual current curve
+- **🎧 Multi-model support** — Auto-detects XM5 vs XM6 and uses the correct protocol (7-byte vs 9-byte payloads + correct UUID)
+- **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough, and auto-ambient settings
+- **📱 App allowlist** — Only trigger ANC for selected apps (e.g., Spotify yes, TikTok no)
+- **⏸️ Pause auto-ANC** — Toggle in the notification to temporarily stop media reactions (manual buttons still work)
+- **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Dashboard tab
+- **🔋 Battery + mode display** — See battery level and current ANC mode in the headphone card
+- **🔄 Auto-reconnect** — Reconnects with exponential backoff if Bluetooth drops
+
+### Dashboard / Settings / EQ tabs
+
+| Tab | Content |
+|---|---|
+| **Dashboard** | Headphone card (model, battery, mode), Start/Stop, quick NC/Ambient/Off |
+| **Settings** | Device selector, ambient level slider, voice passthrough, auto-ambient, app allowlist |
+| **EQ** | 8 preset buttons + visual frequency response curve with draggable band dots |
+
+---
 
 ## How it works
 
-1. A foreground service connects to your headphones via **Bluetooth RFCOMM** using the reverse-engineered Sony MDR protocol (UUID `956c7b26-d49a-4ba8-b03f-b17d393cb6e2` — same as Gadgetbridge).
-2. It monitors **all active media sessions** via `MediaSessionManager` (Spotify, YouTube Music, Podcast Addict, etc.).
-3. When **any** media starts playing → sends the ANC-on payload.
-4. When **all** media is paused/stopped → sends the ambient-sound payload.
-5. If the Bluetooth disconnects (walked out of range, headphones turned off) → automatic reconnection with exponential backoff.
+1. A foreground service connects to your headphones via **Bluetooth RFCOMM** using the reverse-engineered Sony MDR protocol
+2. It monitors active media sessions via `MediaSessionManager` / `AudioManager`
+3. When media plays → sends the ANC-on payload
+4. When paused → sends the ambient-sound payload
+5. If the Bluetooth disconnects → automatic reconnection with exponential backoff
+6. EQ commands use the `0x58` / `0x59` protocol family with 10 band values (±6 dB, +6 offset)
 
 ## Requirements
 
 - **Android 8.0+** (API 26)
-- A **paired** Sony WH-1000XM6, XM5 (or any XM series with the v2 ANC command)
+- A **paired** Sony WH-1000XM6, XM5 (or compatible)
 - Bluetooth enabled
-- Location permission (legacy requirement for Bluetooth scanning on Android 10 and below)
+- Notification access (optional — for app allowlist feature)
 
 ## Building
 
-### With Android Studio (recommended)
+### With Android Studio
 
-1. Open **Android Studio**
-2. `File → Open…` → select the `SonyAncAutoSwitch/` directory
-3. Let Gradle sync (it will suggest installing the SDK components)
-4. `Build → Build Bundle(s) / APK(s) → Build APK(s)`
-5. Install the APK on your phone
+1. `File → Open…` → select the project directory
+2. Let Gradle sync
+3. `Build → Build Bundle(s) / APK(s) → Build APK(s)`
 
-### With command-line Gradle
+### With command line
 
 ```bash
-# Ensure ANDROID_HOME is set to your SDK location
 export ANDROID_HOME=~/Android/Sdk
-
-# Build debug APK
-cd SonyAncAutoSwitch
 ./gradlew assembleDebug
-
-# APK at: app/build/outputs/apk/debug/app-debug.apk
+# APK: app/build/outputs/apk/debug/app-debug.apk
 ```
-
-> Note: You'll need the Gradle wrapper. If it's missing, run `gradle wrapper` in the project root (requires Gradle installed).
 
 ## Installing
 
-1. Pair your WH-1000XM6/XM5 with your phone via **Settings → Bluetooth** (if not already paired)
+1. Pair your headphones via **Settings → Bluetooth**
 2. Install the APK
-3. Open the app → it should show your headphones in the list
-4. Tap **Start Service**
-5. Grant any requested permissions (Bluetooth, Notifications)
-6. A persistent notification appears → the service is running
+3. Open the app → it shows your headphones in the list
+4. Tap **▶ Start**
+5. Grant requested permissions (Bluetooth, Notifications)
+6. A persistent notification appears — the service is running
 
-## Testing
-
-- Open Spotify → play a song → the notification should show "▶ Playing"
-- Pause → the notification shows "⏸ Paused"
-- The app should silently switch ANC/Ambient in the background
-
-## Protocol
-
-Based on the reverse-engineering work from [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and the [sony-mx5-desktop-toggle](https://github.com/MamaJo3/sony-mx5-desktop-toggle) project.
-
-- **Transport:** Bluetooth Classic RFCOMM
-- **Service UUID:** `956c7b26-d49a-4ba8-b03f-b17d393cb6e2`
-- **Frame:** `SOF(0x3E) | escaped(body) | EOF(0x3C)`
-- **ANC payload (v2):** `68 17 01 <on/off> <nc/ambient> <wind> <voice> <level>`
-- **Seq bit:** alternates `0→1→0→1…` per message, resets on reconnect
-
-See [PROTOCOL.md](https://github.com/MamaJo3/sony-mx5-desktop-toggle/blob/main/docs/PROTOCOL.md) for full details.
+The **BuildConfig** includes the current commit hash as `BUILD_HASH` — visible at the bottom of the Dashboard tab.
 
 ## Permissions
 
@@ -80,35 +85,38 @@ See [PROTOCOL.md](https://github.com/MamaJo3/sony-mx5-desktop-toggle/blob/main/d
 | `ACCESS_FINE_LOCATION` | Legacy Bluetooth scan (Android 6–10) |
 | `FOREGROUND_SERVICE` | Keep service alive in background |
 | `POST_NOTIFICATIONS` | Show service notification (Android 13+) |
+| `NOTIFICATION_LISTENER` | App allowlist — detect which app is playing |
+
+## Protocol
+
+The service implements the Sony MDR (Music Data Relay) protocol over Bluetooth RFCOMM:
+
+- **Transport:** Bluetooth Classic RFCOMM
+- **Service UUIDs:** `956c7b26-…` (XM6 v2) or `96cc203e-…` (XM5 v1)
+- **Frame:** `SOF(0x3E) | escaped(body) | EOF(0x3C)`
+- **ANC payload (XM6):** `68 19 01 <enable> <mode> <av> <level> <na> <naSens>` (9 bytes)
+- **ANC payload (XM5):** `68 18 01 <totalEffect> <mode> <av> <level>` (7 bytes)
+- **EQ preset:** `58 00 <presetID> 00` + re-query `56 00`
+- **Custom EQ:** `58 00 <profileID> <count> <bands…>` + re-query
+- **EOF/ACK:** Stop-and-wait, alternating seq bit per message
+
+Protocol reverse-engineering credits: [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) and [xm6-control](https://github.com/MaxKotelnikov/xm6-control).
 
 ## File structure
 
 ```
-SonyAncAutoSwitch/
-├── build.gradle.kts
-├── settings.gradle.kts
-├── app/
-│   ├── build.gradle.kts
-│   └── src/main/
-│       ├── AndroidManifest.xml
-│       ├── java/com/fencewatcher/sonyanc/
-│       │   ├── SonyAncProtocol.kt      # MDR frame builder + escape
-│       │   ├── MediaPlaybackMonitor.kt  # Media session watcher
-│       │   ├── BluetoothAncService.kt   # Foreground RFCOMM service
-│       │   └── MainActivity.kt         # Device picker + controls
-│       └── res/
-│           ├── drawable/ic_headphones.xml
-│           ├── layout/activity_main.xml
-│           └── values/...
-└── README.md
+app/src/main/java/com/fencewatcher/sonyanc/
+├── BluetoothAncService.kt   # Foreground RFCOMM service — connection, handshake, ANC, frame parsing
+├── MediaPlaybackMonitor.kt  # Media session + notification listener for playback detection
+├── HeadphoneProfile.kt       # XM5/XM6 protocol profiles — UUID, payload format, handshake
+├── SonyAncProtocol.kt        # MDR frame builder: SOF/EOF/escaped/checksum
+├── EQPreset.kt               # EQ preset enum (Off/Heavy/Clear/Hard/Soft/Custom/User1-5)
+├── EQGraphView.kt            # Custom Canvas view: frequency response curve with draggable dots
+└── MainActivity.kt           # ˣ-tab UI, device picker, settings, EQ tab
 ```
-
-## XM6 notes
-
-The payloads were confirmed working on XM5 (v2 firmware). The XM6 uses the same protocol — no known breaking changes as of writing. If the ANC behaves unexpectedly, check `adb logcat -s BTAncSvc` for debug output.
 
 ## Credits
 
-- [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgetbridge) — original Sony protocol RE
+- [Gadgetbridge](https://codeberg.org/Freeyourgadget/Gadgebridge) — original Sony protocol RE
 - [Plutoberth/SonyHeadphonesClient](https://github.com/Plutoberth/SonyHeadphonesClient) — protocol documentation
-- [MamaJo3/sony-mx5-desktop-toggle](https://github.com/MamaJo3/sony-mx5-desktop-toggle) — working reference implementation
+- [MaxKotelnikov/xm-control](https://github.com/MaxKotelnikov/xm6-control) — macOS reference implementation with XM5 separations
