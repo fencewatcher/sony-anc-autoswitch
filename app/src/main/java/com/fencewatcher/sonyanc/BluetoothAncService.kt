@@ -195,6 +195,16 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+                ACTION_ENTER_PAIRING_MODE -> {
+                    val enter = intent.getBooleanExtra("enter", true)
+                    Log.d(tag, "Entering pairing mode = $enter")
+                    scope.launch {
+                        sendFrame(SonyMdrV2.buildPairingModeSet(enter), SonyMdrV2.Table.T2)
+                        delay(200L)
+                        sendFrame(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
+                    }
+                }
+
                 ACTION_SET_FIX_PLAYBACK -> {
                     val fix = intent.getBooleanExtra("fix", false)
                     Log.d(tag, "Fix playback = $fix")
@@ -202,6 +212,8 @@ class BluetoothAncService : Service() {
                         sendFrame(SonyMdrV2.buildSourceSwitchControlSet(fix), SonyMdrV2.Table.T2)
                         delay(150L)
                         sendFrame(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
                     }
                 }
 
@@ -530,6 +542,15 @@ class BluetoothAncService : Service() {
                 broadcastStats()
             }
 
+            SonyMdrV2.CMD_PERI_NTFY_STATUS, SonyMdrV2.CMD_PERI_RET_STATUS -> {
+                val pm = SonyMdrV2.decodePairingMode(p)
+                if (pm != null) {
+                    pairingMode = pm
+                    Log.d(tag, "Pairing mode = $pm")
+                    broadcastStats()
+                }
+            }
+
             SonyMdrV2.CMD_PERI_RET_PARAM, SonyMdrV2.CMD_PERI_NTFY_PARAM -> {
                 val subtype = p[1].toInt() and 0xFF
                 when (subtype) {
@@ -550,6 +571,15 @@ class BluetoothAncService : Service() {
                             broadcastStats()
                         }
                     }
+                }
+            }
+
+            SonyMdrV2.CMD_PERI_NTFY_STATUS, SonyMdrV2.CMD_PERI_RET_STATUS -> {
+                val pm = SonyMdrV2.decodePairingMode(p)
+                if (pm != null) {
+                    pairingMode = pm
+                    Log.d(tag, "Pairing mode = $pm")
+                    broadcastStats()
                 }
             }
 
@@ -666,6 +696,8 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
         delay(120)
         sendFrame(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
         delay(120)
         sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
     }
@@ -1078,6 +1110,10 @@ class BluetoothAncService : Service() {
         private set
 
     /** True = "Fix Playback": multipoint will not hand the audio over. */
+
+    /** True while the headphones are in Bluetooth pairing (inquiry scan) mode. */
+    var pairingMode: Boolean = false
+        private set
     var playbackFixed: Boolean = false
         private set
     var voiceGuidanceVolume: Int = -1
@@ -1121,6 +1157,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
+            putExtra(EXTRA_PAIRING_MODE, pairingMode)
             putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
             `package` = packageName
         }
@@ -1161,8 +1198,10 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
         const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
+        const val ACTION_ENTER_PAIRING_MODE = "$PACKAGE.action.ENTER_PAIRING_MODE"
         const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
         const val EXTRA_FIX_PLAYBACK = "fix_playback"
+        const val EXTRA_PAIRING_MODE = "pairing_mode"
 
         const val EXTRA_VOICE_GUIDANCE_VOLUME = "voice_guidance_volume"
 

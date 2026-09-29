@@ -60,7 +60,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FIX_PLAYBACK
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRING_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
@@ -97,6 +98,8 @@ class MainActivity : AppCompatActivity() {
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
+    /** True while the headphones are in Bluetooth pairing mode. */
+    private var pairingModeActive = false
     private var multiNames: Array<String> = emptyArray()
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
@@ -159,6 +162,9 @@ class MainActivity : AppCompatActivity() {
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
+                pairingModeActive = intent.getBooleanExtra(EXTRA_PAIRING_MODE, false)
+                binding.btnPairingMode.text =
+                    if (pairingModeActive) "Leave pairing mode" else "Enter pairing mode"
                 binding.btnFixPlayback.text =
                     if (playbackFixed) "🔒 Playback locked" else "Lock playback to this device"
                 binding.textFixPlaybackState.text = when {
@@ -257,6 +263,14 @@ class MainActivity : AppCompatActivity() {
             val next = !playbackFixed
             sendToService(ACTION_SET_FIX_PLAYBACK) { putExtra("fix", next) }
             toast(if (next) "Locking playback to this device" else "Playback lock released")
+        }
+
+        binding.btnPairingMode.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+            val enter = !pairingModeActive
+            sendToService(ACTION_ENTER_PAIRING_MODE) { putExtra("enter", enter) }
+            toast(if (enter) "Pairing mode — pair your new device, then press again to exit"
+                  else "Leaving pairing mode")
         }
 
         // ---- Headphone feature switches (Table 1 params) ----

@@ -230,6 +230,38 @@ object SonyMdrV2 {
     const val CMD_PERI_SET_EXT_PARAM = 0x3C
     const val CMD_PERI_NTFY_EXT_PARAM = 0x3D
 
+    /** PeripheralBluetoothMode */
+    const val PERI_BT_MODE_NORMAL = 0x00
+    const val PERI_BT_MODE_INQUIRY_SCAN = 0x01
+
+    /**
+     * Enter or leave Bluetooth pairing mode.
+     *
+     * `PeripheralSetStatusParingDeviceManagementCommon` is
+     * [PERI_SET_STATUS, inquiredType, btMode, enableDisableStatus], and the
+     * reference confirms pairing mode is exactly
+     * `btMode == INQUIRY_SCAN_MODE && enableDisableStatus == ENABLE` —
+     * read back the same way from the notify/ret reply.
+     *
+     * The `inquiredType` is the **WITH_BLUETOOTH_CLASS_OF_DEVICE** variant
+     * (0x02), not the CLASSIC_BT one the struct defaults to; the reference
+     * sets it explicitly.
+     */
+    fun buildPairingModeSet(enter: Boolean): ByteArray = byteArrayOf(
+        CMD_PERI_SET_STATUS, PERI_TYPE_DEVICE_MANAGEMENT_COD,
+        if (enter) PERI_BT_MODE_INQUIRY_SCAN else PERI_BT_MODE_NORMAL,
+        0x01, // enableDisableStatus = ENABLE
+    )
+
+    /** Decode the pairing-mode state from a PERI notify/ret status reply. */
+    fun decodePairingMode(p: ByteArray): Boolean? {
+        if (p.size < 4) return null
+        if ((p[1].toInt() and 0xFF) != PERI_TYPE_DEVICE_MANAGEMENT_COD) return null
+        val enabled = (p[3].toInt() and 0xFF) == 0x01
+        val inquiry = (p[2].toInt() and 0xFF) == PERI_BT_MODE_INQUIRY_SCAN
+        return enabled && inquiry
+    }
+
     /**
      * Lock / unlock automatic source switching — the Sony app calls this
      * "Fix Playback". Disabling source-switch control pins playback to whichever
@@ -275,6 +307,17 @@ object SonyMdrV2 {
     /** Probe whether the peripheral family answers at all, before showing any UI. */
     fun buildPeripheralCapabilityGet(): ByteArray =
         byteArrayOf(CMD_PERI_GET_CAPABILITY.toByte(), PERI_TYPE_DEVICE_MANAGEMENT_COD.toByte())
+
+    /**
+     * Query the current pairing-mode state.
+     *
+     * Pairing mode is reported through the STATUS family
+     * (`PeripheralNotifyStatusParingDeviceManagementCommon`), not the PARAM
+     * family used for the device list, so this asks PERI_GET_STATUS rather than
+     * PERI_GET_PARAM. The answer arrives as PERI_RET_STATUS / PERI_NTFY_STATUS.
+     */
+    fun buildPairingModeGet(): ByteArray =
+        byteArrayOf(CMD_PERI_GET_STATUS.toByte(), PERI_TYPE_DEVICE_MANAGEMENT_COD.toByte())
 
     /**
      * Switch the active playback source to [mac] (T2).

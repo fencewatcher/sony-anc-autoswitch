@@ -144,6 +144,21 @@ object MediaAppTracker {
  */
 class MediaNotificationListener : NotificationListenerService() {
 
+    /**
+     * Fires on *any* active-session change — play, pause, track change, app exit —
+     * independently of whether a notification was posted.
+     *
+     * Without this, attribution only refreshed when a media notification arrived.
+     * An app that started playing without posting a new notification left
+     * [MediaAppTracker.playingPackages] empty, which the allowlist reads as "nothing
+     * attributable" and therefore denies — so nothing ever triggered, including the
+     * app the user had explicitly allowed.
+     */
+    private val sessionsChangedListener = android.media.session.MediaSessionManager.OnActiveSessionsChangedListener {
+        runCatching { publish() }
+            .onFailure { Log.e(logTag, "sessionsChanged publish failed: ${it.message}") }
+    }
+
     /** package -> (controller, callback), so callbacks can actually be unregistered. */
     private val registered = HashMap<String, Pair<MediaController, MediaController.Callback>>()
     private val self = ComponentName(this, MediaNotificationListener::class.java)
@@ -223,11 +238,25 @@ class MediaNotificationListener : NotificationListenerService() {
             // Never let attribution failure take down the service.
             Log.e(logTag, "initial publish failed: ${e.message}")
         }
+        // Start listening for real session transitions.
+        try {
+            manager()?.registerOnActiveSessionsChangedListener(
+                sessionsChangedListener, Handler(Looper.getMainLooper()),
+            )
+            Log.d(logTag, "Registered OnActiveSessionsChangedListener")
+        } catch (e: Exception) {
+            Log.e(logTag, "session listener registration failed: ${e.message}")
+        }
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         MediaAppTracker.trackingEnabled = false
+        try {
+            manager()?.unregisterOnActiveSessionsChangedListener(sessionsChangedListener)
+        } catch (e: Exception) {
+            Log.w(logTag, "session listener unregister failed: ${e.message}")
+        }
         registered.values.forEach { (controller, cb) ->
             try {
                 controller.unregisterCallback(cb)
