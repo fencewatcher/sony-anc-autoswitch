@@ -116,6 +116,43 @@ Reply — `PERI_NTFY_EXT_PARAM` (`0x3D`):
 
 `result` `0x00` = success.
 
+### Playback lock ("Fix Playback")
+
+Request — `PERI_SET_PARAM` (`0x38`):
+
+```
+38 01 <value>
+```
+
+Reply — `PERI_NTFY_PARAM` (`0x39`), then `PERI_GET_PARAM`/`PERI_RET_PARAM`:
+
+```
+39 01 <value> <result>
+36 01
+37 01 <value>
+```
+
+**The value is inverted, and getting it wrong is silent.** `value` is
+*source switch control **enabled***, which is the negation of
+*playback fixed* — Sony's own app calls the locked state "Fixing playback
+device", the reference client notes it is "the negation of source switch
+control". So:
+
+| `value` | meaning |
+|---|---|
+| `0x00` | **locked** to this device |
+| `0x01` | unlocked |
+
+Sending `0x01` to lock does not fail. The headset accepts it, replies
+`result=0x00` (success), and locks *nothing* — so a naive "did it return OK"
+check passes while the feature is inverted. The readback has to be inverted
+with it, or the UI and the device agree on the wrong answer.
+
+`result` arrives on the `0x39` notify at offset 3 — **not** on `0x3D`, which
+in practice is not sent for this command. `0x00` success, `1` failed,
+`2` call in progress, `3` no audio connection, `4` voice assistant has
+priority. `3` is the one to expect if you toggle with nothing playing.
+
 ### Music hand-over
 
 `36 03` queries / `39 03 …` reports whether music hand-over is enabled.

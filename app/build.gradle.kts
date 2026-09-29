@@ -20,8 +20,11 @@ android {
         applicationId = "com.fencewatcher.sonyanc"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.3"
+        // versionCode tracks versionName from v1.17 onward. Previously versionName
+        // was pinned at "1.3" through v1.16, so the version on the device could not
+        // tell you which build was installed.
+        versionCode = 17
+        versionName = "1.17"
 
         buildConfigField("String", "BUILD_HASH", "\"$gitHash\"")
 

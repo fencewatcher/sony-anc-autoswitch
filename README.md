@@ -1,10 +1,10 @@
 # Sony ANC Auto-Switch
 
-> Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and **app allowlist**.
+> Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ** and **per-device profiles**.
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.6](https://img.shields.io/badge/version-1.6-blue)
+![v1.17](https://img.shields.io/badge/version-1.17-blue)
 
 ---
 
@@ -24,7 +24,8 @@
   - EQ state readback from headphones — sliders show the actual current curve
 - **🎧 Multi-model support** — Auto-detects XM5 vs XM6 and uses the correct protocol (7-byte vs 9-byte payloads + correct UUID)
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough, and auto-ambient settings
-- **📱 App allowlist** — Only trigger ANC for selected apps (e.g., Spotify yes, TikTok no)
+- **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
+- **📶 Multipoint control** — List paired devices, switch playback between them, connect/disconnect, and unpair
 - **⏸️ Pause auto-ANC** — Toggle in the notification to temporarily stop media reactions (manual buttons still work)
 - **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Dashboard tab
 - **🔋 Battery + mode display** — See battery level and current ANC mode in the headphone card
@@ -35,7 +36,7 @@
 | Tab | Content |
 |---|---|
 | **Dashboard** | Headphone card (model, battery, mode), Start/Stop, quick NC/Ambient/Off |
-| **Settings** | Device selector, ambient level slider, voice passthrough, auto-ambient, app allowlist |
+| **Settings** | Device selector, ambient level slider, voice passthrough, auto-ambient, playback lock, pairing mode, multipoint device list |
 | **EQ** | 8 preset buttons + visual frequency response curve with draggable band dots |
 
 ---
@@ -54,7 +55,6 @@
 - **Android 8.0+** (API 26)
 - A **paired** Sony WH-1000XM6, XM5 (or compatible)
 - Bluetooth enabled
-- Notification access (optional — for app allowlist feature)
 
 ## Building
 
@@ -92,7 +92,6 @@ The **BuildConfig** includes the current commit hash as `BUILD_HASH` — visible
 | `ACCESS_FINE_LOCATION` | Legacy Bluetooth scan (Android 6–10) |
 | `FOREGROUND_SERVICE` | Keep service alive in background |
 | `POST_NOTIFICATIONS` | Show service notification (Android 13+) |
-| `NOTIFICATION_LISTENER` | App allowlist — detect which app is playing |
 
 ## Protocol
 
@@ -114,7 +113,7 @@ Protocol reverse-engineering credits: [Gadgetbridge](https://codeberg.org/Freeyo
 ```
 app/src/main/java/com/fencewatcher/sonyanc/
 ├── BluetoothAncService.kt   # Foreground RFCOMM service — connection, handshake, ANC, frame parsing
-├── MediaPlaybackMonitor.kt  # Media session + notification listener for playback detection
+├── MediaPlaybackMonitor.kt  # Media session for playback detection
 ├── HeadphoneProfile.kt       # XM5/XM6 protocol profiles — UUID, payload format, handshake
 ├── SonyAncProtocol.kt        # MDR frame builder: SOF/EOF/escaped/checksum
 ├── EQPreset.kt               # EQ preset enum (Off/Heavy/Clear/Hard/Soft/Custom/User1-5)
