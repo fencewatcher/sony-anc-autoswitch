@@ -508,6 +508,89 @@
                     android:layout_height="40dp"
                     android:background="@color/surface"
                     android:textColor="@color/on_surface" />
+
+                <!-- ============ AUTOMATIONS ============ -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AUTOMATIONS"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="20dp"
+                    android:paddingBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Decide what the headphones do when things happen. First matching rule wins."
+                    android:textSize="12sp"
+                    android:textColor="#FFAAAAAA"
+                    android:paddingBottom="6dp" />
+
+                <LinearLayout
+                    android:id="@+id/automationList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <Button
+                    android:id="@+id/btnAddAutomation"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:text="+ Add rule"
+                    android:textColor="@android:color/white"
+                    android:paddingHorizontal="8dp"
+                    android:backgroundTint="#FF448866"
+                    android:layout_marginTop="8dp" />
+
+                <Button
+                    android:id="@+id/btnResetAutomation"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:text="Reset to defaults"
+                    android:textColor="#FFAAAAAA"
+                    android:paddingHorizontal="8dp"
+                    android:backgroundTint="#FF333333"
+                    android:layout_marginTop="4dp" />
+
+                <!-- ============ VOLUME ============ -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="VOLUME"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="20dp"
+                    android:paddingBottom="4dp" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Media volume"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface" />
+
+                <SeekBar
+                    android:id="@+id/seekMediaVolume"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="20" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Voice guidance volume"
+                    android:textSize="14sp"
+                    android:textColor="@color/on_surface"
+                    android:paddingTop="8dp" />
+
+                <SeekBar
+                    android:id="@+id/seekVoiceGuidance"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:max="15" />
             </LinearLayout>
 
             <!-- ============ EQ TAB ============ -->

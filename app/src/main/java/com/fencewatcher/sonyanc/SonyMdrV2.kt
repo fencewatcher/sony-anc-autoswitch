@@ -334,6 +334,61 @@ object SonyMdrV2 {
         }
     }
 
+    // ---- Play family (T1, 0xA0..0xA9) — media volume ----
+
+    const val CMD_PLAY_GET_STATUS = 0xA2
+    const val CMD_PLAY_RET_STATUS = 0xA3
+    const val CMD_PLAY_SET_STATUS = 0xA4
+    const val CMD_PLAY_NTFY_STATUS = 0xA5
+    const val CMD_PLAY_GET_PARAM = 0xA6
+    const val CMD_PLAY_RET_PARAM = 0xA7
+    const val CMD_PLAY_SET_PARAM = 0xA8
+    const val CMD_PLAY_NTFY_PARAM = 0xA9
+
+    /** PlayInquiredType */
+    const val PLAY_TYPE_PLAYBACK_CONTROL = 0x03
+    const val PLAY_TYPE_MUSIC_VOLUME = 0x20
+    const val PLAY_TYPE_CALL_VOLUME = 0x21
+
+    fun buildMusicVolumeGet(): ByteArray = byteArrayOf(CMD_PLAY_GET_STATUS.toByte(), PLAY_TYPE_MUSIC_VOLUME.toByte())
+    fun buildMusicVolumeSet(volume: Int): ByteArray = byteArrayOf(
+        CMD_PLAY_SET_STATUS.toByte(), PLAY_TYPE_MUSIC_VOLUME.toByte(), volume.coerceIn(0, 20).toByte(), 0x00,
+    )
+
+    // ---- Voice guidance (T2 only! 0x40..0x48) ----
+    //
+    // On table 1 these bytes mean LE Audio, which is why voice guidance has to be
+    // driven over the peripheral frame or it lands on the wrong feature entirely.
+
+    const val CMD_VOICE_GUIDANCE_GET_PARAM = 0x46
+    const val CMD_VOICE_GUIDANCE_RET_PARAM = 0x47
+    const val CMD_VOICE_GUIDANCE_SET_PARAM = 0x48
+
+    /** VoiceGuidanceInquiredType */
+    const val VOICE_TYPE_ON_OFF = 0x03
+    const val VOICE_TYPE_VOLUME = 0x20
+
+    fun buildVoiceGuidanceVolumeGet(): ByteArray =
+        byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte())
+    fun buildVoiceGuidanceVolumeSet(volume: Int): ByteArray = byteArrayOf(
+        CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte(), volume.coerceIn(0, 15).toByte(), 0x00,
+    )
+
+    // ---- Assignable button / sensor + call capture (T1 SYSTEM) ----
+
+    const val SYS_TYPE_CALL_SETTINGS = 0x08
+
+    fun buildAssignableSettingsGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte())
+    fun buildAssignableSettingsSet(bytes: ByteArray): ByteArray =
+        byteArrayOf(CMD_SYSTEM_SET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte()) + bytes
+
+    fun buildCallSettingsGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_CALL_SETTINGS.toByte())
+    fun buildCallSettingsSet(captureVoice: Boolean): ByteArray = byteArrayOf(
+        CMD_SYSTEM_SET_PARAM.toByte(), SYS_TYPE_CALL_SETTINGS.toByte(), inverted(captureVoice).toByte(),
+    )
+
     // ---- Framing ----
 
     /** `SOF(0x3E) | TYPE SEQ LEN(4, BE) PAYLOAD CHECKSUM | EOF(0x3C)`, body+checksum escaped. */

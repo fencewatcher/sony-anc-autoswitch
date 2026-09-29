@@ -35,6 +35,10 @@ class BluetoothAncService : Service() {
     private var mediaMonitor: MediaPlaybackMonitor? = null
     private var currentSeq = 0
     private var isMediaPlaying = false
+
+    /** User-configurable behaviour rules; defaults reproduce the original hard-coded policy. */
+    @Volatile
+    private var automationRules: List<Automation.Rule> = emptyList()
     private var deviceAddress: String? = null
     private var batteryPercent: Int? = null
     private var currentModeName: String = "—"
@@ -46,6 +50,7 @@ class BluetoothAncService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        automationRules = Automation.load(this)
         createNotificationChannel()
         Log.d(tag, "Service created")
     }
@@ -170,6 +175,26 @@ class BluetoothAncService : Service() {
                     val mode = intent.getIntExtra("mode", 0x11)
                     scope.launch { sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode)) }
                 }
+
+                ACTION_SET_VOLUME -> {
+                    val v = intent.getIntExtra("value", 10)
+                    scope.launch {
+                        sendFrame(SonyMdrV2.buildMusicVolumeSet(v))
+                        delay(120L)
+                        sendFrame(SonyMdrV2.buildMusicVolumeGet())
+                    }
+                }
+
+                ACTION_SET_VOICE_GUIDANCE -> {
+                    val v = intent.getIntExtra("value", 5)
+                    scope.launch {
+                        sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(v), SonyMdrV2.Table.T2)
+                        delay(120L)
+                        sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+                    }
+                }
+
+                ACTION_RELOAD_AUTOMATION -> reloadAutomation()
             }
         } catch (e: Exception) {
             Log.e(tag, "Unhandled in onStartCommand", e)
@@ -348,8 +373,8 @@ class BluetoothAncService : Service() {
                     queryAllState()
                     delay(200L)
 
-                    Log.d(tag, "Handshake complete — sending active ANC command")
-                    sendCommandForPlaybackState()
+                    Log.d(tag, "Handshake complete — re-applying automation rules")
+                    runAutomation(currentPlaybackTrigger())
 
                     // Periodic battery refresh (every 60s) + ANC state re-sync
                     refreshJob?.cancel()
@@ -359,7 +384,7 @@ class BluetoothAncService : Service() {
                             if (!isActive || btSocket == null) break
                             sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
                             delay(500L)
-                            sendCommandForPlaybackState()
+                            runAutomation(currentPlaybackTrigger())
                         }
                     }
 
@@ -547,6 +572,24 @@ class BluetoothAncService : Service() {
                 }
             }
 
+            // ---- Play family: media volume (T1) ----
+            SonyMdrV2.CMD_PLAY_RET_STATUS, SonyMdrV2.CMD_PLAY_NTFY_STATUS -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PLAY_TYPE_MUSIC_VOLUME) {
+                    mediaVolume = p[2].toInt() and 0xFF
+                    Log.d(tag, "Media volume: $mediaVolume")
+                    broadcastStats()
+                }
+            }
+
+            // ---- Voice guidance (T2 only) ----
+            SonyMdrV2.CMD_VOICE_GUIDANCE_RET_PARAM -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.VOICE_TYPE_VOLUME) {
+                    voiceGuidanceVolume = p[2].toInt() and 0xFF
+                    Log.d(tag, "Voice guidance volume: $voiceGuidanceVolume")
+                    broadcastStats()
+                }
+            }
+
             // ---- Audio params: DSEE / BGM / upmix ----
             SonyMdrV2.CMD_AUDIO_RET_PARAM, SonyMdrV2.CMD_AUDIO_NTFY_PARAM -> {
                 val subtype = p[1].toInt() and 0xFF
@@ -583,6 +626,7 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+        sendFrame(SonyMdrV2.buildMusicVolumeGet())
         delay(120)
         // Table 2 — peripheral / multipoint
         sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
@@ -590,6 +634,8 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
         delay(120)
         sendFrame(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
     }
 
     /** Re-read the multipoint list (used after a successful source switch). */
@@ -652,21 +698,60 @@ class BluetoothAncService : Service() {
         Log.d(tag, "Media ${if (playing) "playing" else "paused"}")
         updateNotification(if (playing) "▶ Playing" else "⏸ Paused")
 
-        // Wait a moment for headphone audio state to settle, then send
+        // Wait a moment for headphone audio state to settle, then let the user's
+        // automation rules decide what to do.
         scope.launch {
             delay(300L)  // brief settle, then send immediately
-            sendCommandForPlaybackState()
+            runAutomation(
+                if (playing) Automation.Trigger.PLAYBACK_START else Automation.Trigger.PLAYBACK_STOP
+            )
         }
     }
 
-    /** Sends NC when media is playing, configured ambient otherwise. */
-    private fun sendCommandForPlaybackState() {
-        val cmd = if (isMediaPlaying) {
-            profile.ancOn(ambientLevel())
-        } else {
-            sonyAmbientCommand()
+    /**
+     * Resolve the first enabled rule for [trigger] and execute it.
+     *
+     * The original build hard-coded "playing → NC, stopped → ambient". That is
+     * now just the *default* rule set, so the behaviour is the user's choice
+     * rather than an assumption baked into the app.
+     */
+    private suspend fun runAutomation(trigger: Automation.Trigger) {
+        val rules = automationRules
+        val rule = Automation.resolve(rules, trigger)
+        if (rule == null) {
+            Log.d(tag, "Automation: no rule for ${trigger.id} — leaving state alone")
+            return
         }
-        sendFrame(cmd)
+        Log.d(tag, "Automation: ${trigger.id} → ${Automation.describe(rule)}")
+        when (rule.action.type) {
+            Automation.ActionType.NONE -> Unit
+            Automation.ActionType.SET_MODE -> when (rule.action.mode) {
+                Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
+                Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
+                Automation.Mode.OFF -> sendFrame(profile.ancOff())
+            }
+            Automation.ActionType.SET_AMBIENT_LEVEL -> sendFrame(profile.ancOn(rule.action.value))
+            Automation.ActionType.SET_VOLUME -> {
+                sendFrame(SonyMdrV2.buildMusicVolumeSet(rule.action.value))
+                delay(120L)
+                sendFrame(SonyMdrV2.buildMusicVolumeGet())
+            }
+            Automation.ActionType.SET_EQ_PRESET -> {
+                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR, rule.action.presetId.toByte(), 0x00))
+                delay(120L)
+                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR))
+            }
+        }
+        refreshNotification()
+    }
+
+    private fun currentPlaybackTrigger(): Automation.Trigger =
+        if (isMediaPlaying) Automation.Trigger.PLAYBACK_START else Automation.Trigger.PLAYBACK_STOP
+
+    /** Re-read rules from prefs — called when the UI changes them. */
+    fun reloadAutomation() {
+        automationRules = Automation.load(this)
+        Log.d(tag, "Automation rules reloaded: ${automationRules.size}")
     }
 
     /**
@@ -959,6 +1044,10 @@ class BluetoothAncService : Service() {
         private set
     var upmixCinema: Boolean = false
         private set
+    var mediaVolume: Int = -1
+        private set
+    var voiceGuidanceVolume: Int = -1
+        private set
 
     private fun broadcastStatus(s: Status, message: String? = null) {
         val intent = Intent(STATUS_BROADCAST).apply {
@@ -997,6 +1086,8 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DSEE, dseeExtreme)
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
+            putExtra(EXTRA_MEDIA_VOLUME, mediaVolume)
+            putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
             `package` = packageName
         }
         try { sendBroadcast(intent) } catch (_: Exception) {}
@@ -1034,6 +1125,12 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_BGM = "$PACKAGE.action.SET_BGM"
         const val ACTION_SET_UPMIX = "$PACKAGE.action.SET_UPMIX"
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
+        const val ACTION_SET_VOLUME = "$PACKAGE.action.SET_VOLUME"
+        const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
+        const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
+
+        const val EXTRA_MEDIA_VOLUME = "media_volume"
+        const val EXTRA_VOICE_GUIDANCE_VOLUME = "voice_guidance_volume"
 
         const val EXTRA_TARGET_MAC = "target_mac"
         const val EXTRA_PERIPHERAL_OK = "peripheral_ok"

@@ -58,6 +58,11 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_DSEE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOLUME
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MEDIA_VOLUME
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
 import java.util.Locale
 
@@ -151,6 +156,18 @@ class MainActivity : AppCompatActivity() {
                 bgmMode = intent.getBooleanExtra(EXTRA_BGM, false)
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
+                val vol = intent.getIntExtra(EXTRA_MEDIA_VOLUME, -1)
+                val vg = intent.getIntExtra(EXTRA_VOICE_GUIDANCE_VOLUME, -1)
+                if (vol >= 0) {
+                    updatingUi = true
+                    binding.seekMediaVolume.progress = vol
+                    updatingUi = false
+                }
+                if (vg >= 0) {
+                    updatingUi = true
+                    binding.seekVoiceGuidance.progress = vg
+                    updatingUi = false
+                }
                 renderMultiPoint()
                 renderFeatureSwitches()
             }
@@ -258,6 +275,33 @@ class MainActivity : AppCompatActivity() {
         }
         autoPowerSpinnerReady = true
 
+        // ---- Automations ----
+        loadAutomation()
+        binding.btnAddAutomation.setOnClickListener { showRuleEditor(null) }
+        binding.btnResetAutomation.setOnClickListener {
+            automationRules = Automation.defaultRules()
+            saveAutomation()
+            toast("Rules reset to defaults")
+        }
+
+        // ---- Volume (read back from the headphones, set through the PLAY family) ----
+        binding.seekMediaVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                if (!fromUser || updatingUi) return
+                sendToService(ACTION_SET_VOLUME) { putExtra("value", p) }
+            }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+        })
+        binding.seekVoiceGuidance.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
+                if (!fromUser || updatingUi) return
+                sendToService(ACTION_SET_VOICE_GUIDANCE) { putExtra("value", p) }
+            }
+            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+        })
+
         // EQ graph callbacks
         binding.eqGraph.onBandChanged = { index, value ->
             eqBandValues[index] = value
@@ -295,6 +339,131 @@ class MainActivity : AppCompatActivity() {
             binding.eqGraph.bandValues = eqBandValues
             if (BluetoothAncService.isRunning) sendToService(ACTION_GET_STATUS) {}
         }
+    }
+
+    // ---- Automations + volume ----
+
+    private var automationRules: List<Automation.Rule> = emptyList()
+
+    private fun loadAutomation() {
+        automationRules = Automation.load(this)
+        renderAutomation()
+    }
+
+    private fun saveAutomation() {
+        Automation.save(this, automationRules)
+        sendToService(ACTION_RELOAD_AUTOMATION) {}
+        renderAutomation()
+    }
+
+    private fun renderAutomation() {
+        val box = binding.automationList
+        box.removeAllViews()
+        if (automationRules.isEmpty()) {
+            box.addView(android.widget.TextView(this).apply {
+                text = "No rules yet — nothing will change automatically."
+                textSize = 13f
+                setTextColor(Color.rgb(150, 150, 150))
+                setPadding(0, 8, 0, 8)
+            })
+            return
+        }
+        automationRules.forEachIndexed { index, rule ->
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 12, 0, 12)
+                isClickable = true
+                setBackgroundColor(if (rule.enabled) 0x22334466 else 0x00000000)
+            }
+            val label = android.widget.TextView(this).apply {
+                text = "When ${rule.trigger.label.lowercase()}\n→ ${Automation.describe(rule)}"
+                textSize = 13f
+                setTextColor(if (rule.enabled) Color.rgb(220, 220, 220) else Color.rgb(120, 120, 120))
+                setPadding(12, 0, 8, 0)
+            }
+            row.addView(label, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val toggle = android.widget.Switch(this).apply {
+                isChecked = rule.enabled
+                setOnCheckedChangeListener { _, checked ->
+                    automationRules = automationRules.toMutableList().also {
+                        it[index] = it[index].copy(enabled = checked)
+                    }
+                    saveAutomation()
+                }
+            }
+            row.addView(toggle)
+            row.setOnClickListener { showRuleEditor(index) }
+            row.setOnLongClickListener {
+                automationRules = automationRules.filterIndexed { i, _ -> i != index }
+                saveAutomation()
+                true
+            }
+            box.addView(row)
+        }
+    }
+
+    /**
+     * Rule editor: three spinners (when / do / value) in one dialog. Long-pressing a
+     * rule in the list deletes it, which keeps this to a single interaction surface.
+     */
+    private fun showRuleEditor(existingIndex: Int?) {
+        val triggers = Automation.Trigger.values()
+        val actionTypes = listOf(
+            Automation.ActionType.NONE,
+            Automation.ActionType.SET_MODE,
+            Automation.ActionType.SET_AMBIENT_LEVEL,
+            Automation.ActionType.SET_VOLUME,
+            Automation.ActionType.SET_EQ_PRESET,
+        )
+        val base = existingIndex?.let { automationRules[it] }
+            ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START, Automation.Action())
+
+        val linear = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+            setPadding(48, 32, 48, 8)
+        }
+        fun <T> spinner(items: List<T>, selected: Int): android.widget.Spinner {
+            val sp = android.widget.Spinner(this)
+            sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            sp.setSelection(selected)
+            linear.addView(sp)
+            return sp
+        }
+
+        val whenSp = spinner(triggers.map { it.label }, triggers.indexOf(base.trigger))
+        val doSp = spinner(actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
+        val valueSp = spinner(listOf("Low (5)", "Medium (10)", "High (15)", "Max (20)"), 1)
+
+        val dialog = android.app.AlertDialog.Builder(this)
+            .setTitle(if (existingIndex == null) "New rule" else "Edit rule")
+            .setView(linear)
+            .setPositiveButton("Save") { _, _ ->
+                val type = actionTypes[doSp.selectedItemPosition]
+                val n = listOf(5, 10, 15, 20)[valueSp.selectedItemPosition]
+                val action = when (type) {
+                    Automation.ActionType.SET_MODE -> Automation.Action(
+                        type = type, mode = Automation.Mode.NC, value = 0,
+                    )
+                    Automation.ActionType.SET_AMBIENT_LEVEL -> Automation.Action(type = type, value = n)
+                    Automation.ActionType.SET_VOLUME -> Automation.Action(type = type, value = n)
+                    Automation.ActionType.SET_EQ_PRESET -> Automation.Action(type = type, presetId = 0x30)
+                    else -> Automation.Action(type = type)
+                }
+                val rule = base.copy(trigger = triggers[whenSp.selectedItemPosition], action = action)
+                automationRules = if (existingIndex == null) {
+                    automationRules + rule
+                } else {
+                    automationRules.toMutableList().also { it[existingIndex] = rule }
+                }
+                saveAutomation()
+            }
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.show()
     }
 
     // ---- Multipoint + feature state rendering ----
