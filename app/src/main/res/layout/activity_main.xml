@@ -204,15 +204,20 @@
 
                 </LinearLayout></com.google.android.material.card.MaterialCardView></LinearLayout></ScrollView><ScrollView android:id="@+id/routinesContent" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="@dimen/content_gutter" android:paddingVertical="16dp"><!-- Quick Access is a trigger/action shortcut, so it belongs with the
          automations rather than in the device connection card. -->
-    <LinearLayout android:id="@+id/quickAccessGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
+    <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp">
+            <LinearLayout android:id="@+id/quickAccessGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp">
 
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quick Access — launches a music service" android:textSize="13sp" android:textColor="#FFFFFFFF" android:paddingTop="12dp" />
+                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="QUICK ACCESS" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" />
 
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Press [NC/AMB] twice" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="6dp" />
-                <Spinner android:id="@+id/spinnerQaLeft" android:layout_width="match_parent" android:layout_height="wrap_content" />
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Press the [NC/AMB] button to launch a music service" android:textSize="12sp" android:textColor="#FFAAAAAA" android:paddingTop="4dp" android:paddingBottom="10dp" />
 
-                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Press [NC/AMB] three times" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="4dp" />
-                <Spinner android:id="@+id/spinnerQaRight" android:layout_width="match_parent" android:layout_height="wrap_content" />            </LinearLayout>
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Twice" android:textSize="11sp" android:textColor="#FF888888" />
+                <Spinner android:id="@+id/spinnerQaLeft" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginBottom="12dp" />
+
+                <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Three times" android:textSize="11sp" android:textColor="#FF888888" />
+                <Spinner android:id="@+id/spinnerQaRight" android:layout_width="match_parent" android:layout_height="wrap_content" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
 
          <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AUTOMATIONS" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="4dp" />
 

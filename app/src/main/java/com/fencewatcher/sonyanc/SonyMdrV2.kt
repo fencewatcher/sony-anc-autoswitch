@@ -280,7 +280,15 @@ object SonyMdrV2 {
         else -> "0x%02x".format(v)
     }
 
-    // ---- Upscaling / DSEE indicator (T1, COMMON group type 0x03) ----
+    /**
+     * LDAC, as reported by the active-codec read (12 02 -> 13 02).
+     *
+     * This is the authoritative LDAC signal. The LDAC flag carried in the AUDIO
+     * connection-mode reply (e3 02 00 01) decodes as "inactive" on this model
+     * while the codec simultaneously reports LDAC, so that field's position was
+     * never established here and is not trusted.
+     */
+    const val CODEC_LDAC = 0x10
     //
     // Sibling of the codec read, which is 12 02 on the same command. Confirmed
     // there is NO disable-reason field for this feature: StatusDisableReason in

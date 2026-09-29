@@ -923,6 +923,10 @@ class BluetoothAncService : Service() {
                         val c = p[2].toInt() and 0xFF
                         if (c != activeCodec) {
                             activeCodec = c
+                            // Derive LDAC from the codec rather than from the AUDIO
+                            // connection-mode flag, which reports "inactive" here even
+                            // while this same read says LDAC.
+                            ldacActive = c == SonyMdrV2.CODEC_LDAC
                             Log.d(tag, "Active codec: ${SonyMdrV2.codecName(c)}")
                         }
                         broadcastStats()
@@ -998,16 +1002,13 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            // AUDIO_RET_STATUS carries LDAC activity: [cmd, type, status, ldacEnable].
-            // This is the codec readout the protocol does allow — the codec cannot
-            // be selected, but whether LDAC is actually running can be observed.
+            // AUDIO_RET_STATUS for the connection mode. The LDAC flag in this reply
+            // is deliberately not read: on the XM6 it reports inactive while the
+            // codec read simultaneously reports LDAC, so its field position is not
+            // established and it cannot be trusted. LDAC is derived from the codec.
             SonyMdrV2.CMD_AUDIO_RET_STATUS -> {
                 if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6) {
-                    val l = SonyMdrV2.decodeInvertedEnable(p[3].toInt() and 0xFF)
-                    if (l != null) {
-                        ldacActive = l
-                        Log.d(tag, "LDAC active: $l")
-                    }
+                    Log.d(tag, "Connection mode status: ${SonyMdrV2.hex(p.copyOfRange(2, p.size))}")
                     broadcastStats()
                 }
             }
@@ -1069,7 +1070,6 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildBgmGet())
         request(SonyMdrV2.buildUpmixGet())
         request(SonyMdrV2.buildConnectionModeGet(isXm5()))
-        request(SonyMdrV2.buildLdacStatusGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
