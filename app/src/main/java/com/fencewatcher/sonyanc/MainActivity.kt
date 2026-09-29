@@ -413,6 +413,25 @@ class MainActivity : AppCompatActivity() {
         }
         autoPowerSpinnerReady = true
 
+        // Hidden debug menu: five taps on the headphone image.
+        //
+        // This is deliberately undiscoverable. The menu sends arbitrary payloads
+        // at the headphones, which is fine for someone who knows they tapped into
+        // it and a bad surprise for anyone who does not.
+        var debugTaps = 0
+        var lastDebugTap = 0L
+        binding.imageModel.setOnClickListener {
+            val now = System.currentTimeMillis()
+            // A slow series of taps is not a series of taps.
+            if (now - lastDebugTap > 1500L) debugTaps = 0
+            lastDebugTap = now
+            debugTaps++
+            if (debugTaps >= 5) {
+                debugTaps = 0
+                startActivity(android.content.Intent(this, DebugActivity::class.java))
+            }
+        }
+
         // Connection mode: sound quality vs connection stability. This picks a
         // *priority*, not a codec — the active codec is negotiated with the phone
         // and the protocol has no command to force LDAC/aptX.

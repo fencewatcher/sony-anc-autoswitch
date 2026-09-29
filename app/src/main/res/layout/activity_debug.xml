@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/dark_gray"
+    android:padding="12dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="DEBUG — hidden menu"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:textColor="#FF7FD4A8"
+        android:paddingBottom="2dp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SENSE and LDAC status draw silence on this model — send payloads by hand to find out why."
+        android:textSize="11sp"
+        android:textColor="#FF888888"
+        android:paddingBottom="8dp" />
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#FF111111"
+        android:padding="6dp">
+
+        <TextView
+            android:id="@+id/textFrameLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textSize="10sp"
+            android:textColor="#FFCCCCCC"
+            android:textIsSelectable="true"
+            android:text="no frames yet" />
+    </ScrollView>
+
+    <EditText
+        android:id="@+id/editHex"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/bg_field"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="10dp"
+        android:hint="payload hex, e.g. 70 00  or  0xE2,0x02"
+        android:fontFamily="monospace"
+        android:textSize="13sp"
+        android:textColor="#FFFFFFFF"
+        android:textColorHint="#FF666666"
+        android:inputType="textNoSuggestions"
+        android:maxLines="1"
+        android:importantForAutofill="no" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingTop="6dp">
+
+        <CheckBox
+            android:id="@+id/chkT2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="T2"
+            android:textSize="12sp"
+            android:textColor="#FFCCCCCC" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btnCopy"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:text="Copy"
+            android:textSize="12sp" />
+
+        <Button
+            android:id="@+id/btnClear"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:minWidth="0dp"
+            android:text="Clear"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/btnSend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="SEND RAW FRAME"
+        android:textSize="13sp" />
+
+    <TextView
+        android:id="@+id/textStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textSize="11sp"
+        android:textColor="#FF7FD4A8"
+        android:paddingTop="4dp" />
+
+</LinearLayout>

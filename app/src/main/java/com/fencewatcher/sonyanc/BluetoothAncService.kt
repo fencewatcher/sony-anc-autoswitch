@@ -202,6 +202,25 @@ class BluetoothAncService : Service() {
                     scope.launch { sendFrame(SonyMdrV2.buildUpmixSet(on)) }
                 }
 
+                ACTION_CLEAR_FRAME_LOG -> {
+                    frameLog.clear()
+                    pushFrameLog()
+                }
+
+                ACTION_GET_FRAME_LOG -> pushFrameLog()
+
+                ACTION_SEND_RAW -> {
+                    val hex = intent.getStringExtra("hex")
+                    val bytes = hex?.let { parseHex(it) }
+                    if (bytes == null) {
+                        Log.w(tag, "Rejected raw payload: $hex")
+                    } else {
+                        val table = if (intent.getBooleanExtra("t2", false))
+                            SonyMdrV2.Table.T2 else SonyMdrV2.Table.T1
+                        scope.launch { sendFrame(bytes, table) }
+                    }
+                }
+
                 ACTION_SET_CONNECTION_MODE -> {
                     val soundQuality = intent.getBooleanExtra("sound_quality", true)
                     scope.launch {
@@ -484,6 +503,7 @@ class BluetoothAncService : Service() {
                                         val ackSeq = (frame.sequence xor 1) and 0xFF
                                         sendAck(ackSeq)
                                         Log.d(tag, "← [${if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(frame.payload)}")
+                                        recordFrame("RX", if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1", frame.payload)
                                         parseIncoming(frame)
                                     }
                                 }
@@ -1033,6 +1053,7 @@ class BluetoothAncService : Service() {
             socket.outputStream.write(frame)
             socket.outputStream.flush()
             Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$currentSeq")
+            recordFrame("TX", if (table == SonyMdrV2.Table.T2) "T2" else "T1", payload, currentSeq)
             currentSeq = currentSeq xor 1
 
             // Track the mode we last commanded (for notification stats)
@@ -1071,6 +1092,58 @@ class BluetoothAncService : Service() {
     /**
      * Send a protocol ACK frame (dataType=0x01, flipped seq, empty payload).
      */
+    // ---- Hidden debug menu: frame log + raw payload injection ----
+    //
+    // SENSE and the LDAC status read both draw silence from the XM6, and working
+    // out why by guessing type bytes one release at a time is slow. This records
+    // the traffic and lets a payload be sent by hand, so the protocol can be read
+    // off the device instead of proposed and rejected.
+
+    private val frameLog = ArrayDeque<String>()
+    private var lastFrameLogPush = 0L
+
+    private fun recordFrame(direction: String, table: String, payload: ByteArray, seq: Int? = null) {
+        val cal = java.util.Calendar.getInstance()
+        val stamp = String.format(
+            java.util.Locale.US, "%02d:%02d:%02d.%03d",
+            cal.get(java.util.Calendar.HOUR_OF_DAY), cal.get(java.util.Calendar.MINUTE),
+            cal.get(java.util.Calendar.SECOND), cal.get(java.util.Calendar.MILLISECOND),
+        )
+        val seqTxt = if (seq != null) " seq=$seq" else ""
+        frameLog.addLast("$stamp  $direction [$table] ${SonyMdrV2.hex(payload)}$seqTxt")
+        while (frameLog.size > 300) frameLog.removeFirst()
+        // Throttle: a burst of frames would otherwise rebroadcast per byte.
+        val now = System.currentTimeMillis()
+        if (now - lastFrameLogPush > 250L) {
+            lastFrameLogPush = now
+            pushFrameLog()
+        }
+    }
+
+    private fun pushFrameLog() {
+        val intent = Intent(FRAME_LOG_BROADCAST).apply {
+            putExtra(EXTRA_FRAME_LOG, frameLog.joinToString("\n"))
+            `package` = packageName
+        }
+        try { sendBroadcast(intent) } catch (_: Exception) {}
+    }
+
+    /** "e7 02 00" / "e7,02,00" / "e70200" -> bytes; null when unparseable. */
+    private fun parseHex(input: String): ByteArray? {
+        val cleaned = input.replace(",", " ").replace("-", " ").trim()
+        if (cleaned.isEmpty()) return null
+        val parts = if (cleaned.contains(' ')) cleaned.split(Regex("\\s+"))
+        else cleaned.chunked(2)
+        val out = ArrayList<Byte>(parts.size)
+        for (p in parts) {
+            if (p.isEmpty()) continue
+            val v = p.toIntOrNull(16) ?: return null
+            if (v !in 0..0xFF) return null
+            out.add(v.toByte())
+        }
+        return if (out.isEmpty()) null else out.toByteArray()
+    }
+
     private fun sendAck(seq: Int) {
         val socket = btSocket ?: return
         try {
@@ -1462,6 +1535,14 @@ class BluetoothAncService : Service() {
 
         /** True when the headphones report LDAC is actually in use. */
         const val EXTRA_LDAC_ACTIVE = "ldac_active"
+
+        const val FRAME_LOG_BROADCAST = "$PACKAGE.action.FRAME_LOG"
+        const val EXTRA_FRAME_LOG = "frame_log"
+        const val ACTION_SEND_RAW = "$PACKAGE.action.SEND_RAW"
+        const val ACTION_CLEAR_FRAME_LOG = "$PACKAGE.action.CLEAR_FRAME_LOG"
+
+        /** Re-send the current log without clearing it. */
+        const val ACTION_GET_FRAME_LOG = "$PACKAGE.action.GET_FRAME_LOG"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
