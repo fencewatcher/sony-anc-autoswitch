@@ -215,6 +215,10 @@ class MainActivity : AppCompatActivity() {
                 if (intent.hasExtra(EXTRA_HEADPHONES_WORN)) {
                     headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
                 }
+                // The feature line has its own single call site, so a codec that
+                // arrives without any other state change would sit unread until
+                // something else happened to trigger a refresh.
+                renderFeatureStatus()
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
                 if (intent.hasExtra(EXTRA_AUTO_PAUSED)) {
@@ -971,7 +975,9 @@ class MainActivity : AppCompatActivity() {
             binding.textFeatureStatus.visibility = android.view.View.GONE
         } else {
             binding.textFeatureStatus.visibility = android.view.View.VISIBLE
-            binding.textFeatureStatus.text = "On: " + on.joinToString(" · ")
+            // No "On:" prefix — it described the toggles but read as nonsense once
+            // the codec joined the line, since a codec is not switched on.
+            binding.textFeatureStatus.text = on.joinToString(" · ")
         }
     }
 
