@@ -16,5 +16,4 @@ To filter which apps trigger ANC, enable "Only trigger for selected apps" and ch
 Protocol: MDR framing over Bluetooth RFCOMM
 (service UUID 956c7b26-…)
 Originally reverse-engineered by Gadgetbridge.</string>
-    <string name="settings_text">⚙️ SETTINGS\nAmbient level: how loud ambient sound is when paused (1 = faint, 20 = loudest).\n\nFocus on voice: keeps voices audible over ambient noise.</string>
 </resources>

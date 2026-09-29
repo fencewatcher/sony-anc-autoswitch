@@ -386,7 +386,7 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Connected!")
                     status = Status.CONNECTED
                     broadcastStatus(status, "Connected")
-                    updateNotification("Connected ✓")
+                    updateNotification("Connected")
                     currentSeq = 0       // Reset seq on every fresh connection
                     retries = 0          // Reset retry counter on success
 

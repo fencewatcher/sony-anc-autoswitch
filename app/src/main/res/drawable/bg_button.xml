@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared button background. Every button was a default square-cornered Material
+  button sitting inside 16dp cards, which is what made the non-Home tabs look
+  inconsistent — the cards rounded and the controls did not.
+
+  A shape drawable plus backgroundTint (not setBackgroundColor) means the corners
+  survive recolouring. setBackgroundColor() on a shape overwrites the shape's
+  colour and is fine, but a colour applied any other way can flatten the corners
+  back out; tinting is the mechanism that preserves them.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:radius="16dp" />
+</shape>

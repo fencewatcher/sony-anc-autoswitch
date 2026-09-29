@@ -186,7 +186,7 @@ class MainActivity : AppCompatActivity() {
                 binding.btnPairingMode.text =
                     if (pairingModeActive) "Leave pairing mode" else "Enter pairing mode"
                 binding.btnFixPlayback.text =
-                    if (playbackFixed) "🔒 Playback locked" else "Lock playback to this device"
+                    if (playbackFixed) "Playback locked" else "Lock playback to this device"
                 binding.textFixPlaybackState.text = when {
                     !peripheralSupported ->
                         "Peripheral/multipoint family not supported on this device"
@@ -432,7 +432,7 @@ class MainActivity : AppCompatActivity() {
         suppressAutoSwitch = true
         binding.switchAuto.isChecked = !autoPaused
         suppressAutoSwitch = false
-        binding.textAutoSwitch.text = if (autoPaused) "⏸ Automations paused" else "⚡ Automations"
+        binding.textAutoSwitch.text = if (autoPaused) "Automations paused" else "Automations"
         binding.textAutoSwitch.setTextColor(
             if (autoPaused) Color.rgb(255, 198, 92) else Color.rgb(224, 224, 224)
         )
@@ -449,7 +449,7 @@ class MainActivity : AppCompatActivity() {
         when {
             autoPaused -> {
                 binding.textAutomationSummary.visibility = View.VISIBLE
-                binding.textAutomationSummary.text = "⏸ Paused — $active of $total rules will not fire"
+                binding.textAutomationSummary.text = "Paused — $active of $total rules will not fire"
                 binding.textAutomationSummary.setTextColor(Color.rgb(255, 198, 92))
             }
             total > 0 -> {
@@ -676,7 +676,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             val label = android.widget.TextView(this).apply {
-                text = (if (isActive) "▶ " else "") + name
+                text = name
                 textSize = 14f
                 setTextColor(if (isActive) Color.rgb(120, 230, 180) else Color.rgb(210, 210, 210))
             }
@@ -763,7 +763,7 @@ class MainActivity : AppCompatActivity() {
         binding.eqGraph.interactive = false
         binding.btnApplyCustomEQ.visibility = View.GONE
         Handler(Looper.getMainLooper()).postDelayed({
-            binding.textEQStatus.text = "✅ ${preset.displayName}"
+            binding.textEQStatus.text = preset.displayName
         }, 2000)
     }
 
@@ -798,9 +798,9 @@ class MainActivity : AppCompatActivity() {
         val preset = EQPreset.fromId(eqActivePreset)
         val bands = eqActiveBands
         binding.textEQStatus.text = if (bands != null && bands.size == 10) {
-            "✅ ${preset.displayName} [${bands.joinToString(" ") { "%+d".format(it) }}]"
+            "${preset.displayName} [${bands.joinToString(" ") { "%+d".format(it) }}]"
         } else {
-            "✅ ${preset.displayName}"
+            preset.displayName
         }
     }
 
@@ -854,18 +854,18 @@ class MainActivity : AppCompatActivity() {
         pairedDevices.clear()
         val adapter = BluetoothAdapter.getDefaultAdapter()
         if (adapter == null || !adapter.isEnabled) {
-            updateCardStatus("⚠️ Bluetooth off"); binding.btnToggle.isEnabled = false; return
+            updateCardStatus("Bluetooth off"); binding.btnToggle.isEnabled = false; return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
-        ) { updateCardStatus("⚠️ Permission needed"); binding.btnToggle.isEnabled = false; return }
+        ) { updateCardStatus("Permission needed"); binding.btnToggle.isEnabled = false; return }
 
         for (d in (adapter.bondedDevices ?: emptySet())) {
             val name = d.name ?: ""
             if (name.contains("WH-1000XM", ignoreCase = true)) pairedDevices.add(DeviceInfo(name, d.address))
         }
         if (pairedDevices.isEmpty()) {
-            binding.textModel.text = "No headphones"; updateCardStatus("🔍 Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
+            binding.textModel.text = "No headphones"; updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
             updateModelArt("")
         } else {
             val first = pairedDevices.first().name
@@ -917,7 +917,7 @@ class MainActivity : AppCompatActivity() {
         Intent(this, BluetoothAncService::class.java).apply {
             action = ACTION_START; putExtra(EXTRA_ADDRESS, device.address)
         }.also { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it) else startService(it) }
-        updateServiceRunning(true); updateCardStatus("🔄 Starting…")
+        updateServiceRunning(true); updateCardStatus("Starting…")
     }
 
     private fun stopService() {
@@ -929,23 +929,36 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateServiceRunning(running: Boolean) {
         serviceRunning = running
-        binding.btnToggle.text = if (running) "⏹ Stop" else "▶ Start"
-        binding.btnToggle.setBackgroundColor(ContextCompat.getColor(this, if (running) android.R.color.holo_red_dark else android.R.color.holo_green_dark))
+        binding.btnToggle.text = if (running) "Stop" else "Start"
+        // Tint rather than setBackgroundColor. The latter overrode the rounded
+        // shape drawable, which is why this rendered as a hard square slab. The
+        // old holo_green_dark is also a very saturated green; muted to sit with
+        // the rest of the palette.
+        binding.btnToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(
+            if (running) Color.rgb(0x4A, 0x22, 0x22) else Color.rgb(0x2E, 0x4A, 0x38)
+        )
     }
 
     private fun updateStatusDisplay(status: BluetoothAncService.Status, msg: String? = null) {
-        val icon = when (status) {
-            BluetoothAncService.Status.DISCONNECTED -> "⚪"; BluetoothAncService.Status.CONNECTING -> "🔄"
-            BluetoothAncService.Status.CONNECTED -> "🟢"; BluetoothAncService.Status.ERROR -> "🔴"
+        // A single geometric dot carrying the state in its colour, rather than a
+        // per-status emoji. Same affordance, and it tints with the palette.
+        val tint = when (status) {
+            BluetoothAncService.Status.DISCONNECTED -> Color.rgb(138, 138, 138)
+            BluetoothAncService.Status.CONNECTING -> Color.rgb(232, 196, 120)
+            BluetoothAncService.Status.CONNECTED -> Color.rgb(127, 212, 168)
+            BluetoothAncService.Status.ERROR -> Color.rgb(226, 128, 128)
         }
-        updateCardStatus(if (msg != null) "$icon $status — $msg" else "$icon $status")
+        val text = if (msg != null) "$status — $msg" else status.name.lowercase()
+            .replaceFirstChar { it.uppercase() }
+        updateCardStatus(text)
+        binding.textStatus.setTextColor(tint)
     }
 
     private fun updateCardStatus(text: String) { binding.textStatus.text = text }
 
     private fun updateCardStats() {
-        binding.textBattery.text = battery?.let { "🔋$it%" } ?: "🔋—"
-        binding.textMode.text = "🎧 $currentMode"
+        binding.textBattery.text = battery?.let { "$it%" } ?: "—"
+        binding.textMode.text = currentMode
         updateModeHighlight()
     }
 
@@ -962,12 +975,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setModeState(
-        icon: android.widget.TextView,
+        icon: android.widget.ImageView,
         label: android.widget.TextView,
         active: Boolean,
     ) {
         // Drives the bg_mode_circle selector: selected = filled.
         icon.isSelected = active
+        // The circle fills with near-white when selected, so the glyph has to
+        // invert with it or it disappears into the background.
+        icon.setColorFilter(if (active) Color.rgb(38, 38, 38) else Color.rgb(150, 150, 150))
         label.setTextColor(if (active) Color.rgb(224, 224, 224) else Color.rgb(138, 138, 138))
     }
 
