@@ -2,7 +2,7 @@ package com.fencewatcher.sonyanc
 
 import android.content.ComponentName
 import android.content.Context
-import android.media.session.MediaSession
+import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Handler
@@ -22,7 +22,7 @@ import android.util.Log
  * The supported route is to be a bound [NotificationListenerService] and call
  * `getActiveSessions()` with *this listener's own* ComponentName. A bound
  * listener is a trusted caller, so this works on every version including 14+.
- * That yields real [MediaSession] objects, which gives two things the old
+ * That yields real [MediaController] objects, which gives two things the old
  * notification-watching approach never could:
  *
  *  1. **Real playback state.** A paused Spotify keeps its media notification
@@ -110,15 +110,15 @@ object MediaAppTracker {
  */
 class MediaNotificationListener : NotificationListenerService() {
 
-    private val callbacks = HashMap<String, MediaSession.Callback>()
+    private val callbacks = HashMap<String, MediaController.Callback>()
     private val self = ComponentName(this, MediaNotificationListener::class.java)
     private val logTag = "MediaNotifListener"
 
     private fun manager() =
         getSystemService(Context.MEDIA_SESSION_SERVICE) as? MediaSessionManager
 
-    private fun isPlaying(session: MediaSession): Boolean {
-        val state = session.playbackState ?: return false
+    private fun isPlaying(controller: MediaController): Boolean {
+        val state = controller.playbackState ?: return false
         return state.state == PlaybackState.STATE_PLAYING
     }
 
@@ -143,7 +143,7 @@ class MediaNotificationListener : NotificationListenerService() {
         sessions.forEach { s ->
             val pkg = s.packageName ?: return@forEach
             if (!callbacks.containsKey(pkg)) {
-                val cb = object : MediaSession.Callback() {
+                val cb = object : MediaController.Callback() {
                     override fun onPlaybackStateChanged(state: PlaybackState?) {
                         refresh()
                     }
