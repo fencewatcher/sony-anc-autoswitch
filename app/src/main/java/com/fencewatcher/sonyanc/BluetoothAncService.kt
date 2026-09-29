@@ -39,6 +39,14 @@ class BluetoothAncService : Service() {
     /** User-configurable behaviour rules; defaults reproduce the original hard-coded policy. */
     @Volatile
     private var automationRules: List<Automation.Rule> = emptyList()
+
+    /**
+     * Set when the user asks the app to power the headphones down. The device then
+     * drops Bluetooth, which would otherwise look like a fault and send the
+     * reconnect loop hammering an intentionally-off device 20 times.
+     */
+    @Volatile
+    private var powerOffRequested = false
     private var deviceAddress: String? = null
     private var batteryPercent: Int? = null
     private var currentModeName: String = "—"
@@ -68,6 +76,7 @@ class BluetoothAncService : Service() {
                         }
                     deviceAddress = address
                     isRunning = true
+                    powerOffRequested = false   // fresh start, not a leftover power-off
                     Log.d(tag, "Starting service, device=$address")
                     safeStartForeground()
                     serviceInit(address)
@@ -125,6 +134,7 @@ class BluetoothAncService : Service() {
 
                 ACTION_POWER_OFF -> {
                     Log.d(tag, "Power-off command")
+                    powerOffRequested = true
                     scope.launch {
                         sendFrame(SonyMdrV2.buildPowerOff())
                     }
@@ -375,6 +385,7 @@ class BluetoothAncService : Service() {
 
                     Log.d(tag, "Handshake complete — re-applying automation rules")
                     runAutomation(currentPlaybackTrigger())
+                    runAutomation(Automation.Trigger.DEVICE_CONNECTED)
 
                     // Periodic battery refresh (every 60s) + ANC state re-sync
                     refreshJob?.cancel()
@@ -415,11 +426,24 @@ class BluetoothAncService : Service() {
                     }
 
                     // Socket closed — reconnect automatically
-                    Log.d(tag, "Socket closed — reconnecting")
                     btSocket = null
                     status = Status.DISCONNECTED
+
+                    if (powerOffRequested) {
+                        // The user turned the headphones off on purpose. Do not
+                        // treat the resulting disconnect as a fault.
+                        Log.d(tag, "Socket closed after deliberate power-off — not reconnecting")
+                        powerOffRequested = false
+                        broadcastStatus(status, "Powered off")
+                        updateNotification("Powered off")
+                        refreshNotification()
+                        return@launch
+                    }
+
+                    Log.d(tag, "Socket closed — reconnecting")
                     broadcastStatus(status, "Disconnected")
                     updateNotification("Disconnected, reconnecting…")
+                    runAutomation(Automation.Trigger.DEVICE_DISCONNECTED)
                     triggerReconnect()
                     return@launch
 

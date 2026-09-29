@@ -110,7 +110,8 @@ object MediaAppTracker {
  */
 class MediaNotificationListener : NotificationListenerService() {
 
-    private val callbacks = HashMap<String, MediaController.Callback>()
+    /** package -> (controller, callback), so callbacks can actually be unregistered. */
+    private val registered = HashMap<String, Pair<MediaController, MediaController.Callback>>()
     private val self = ComponentName(this, MediaNotificationListener::class.java)
     private val logTag = "MediaNotifListener"
 
@@ -137,20 +138,30 @@ class MediaNotificationListener : NotificationListenerService() {
             .mapNotNull { it.packageName }
             .toSet()
 
-        // Keep callbacks attached to the sessions we care about.
+        // Keep callbacks attached to the sessions we care about, and genuinely
+        // unregister the ones we drop — dropping them from the map alone leaked
+        // a callback per controller for the lifetime of the listener.
         val wanted = sessions.mapNotNull { it.packageName }.toSet()
-        (callbacks.keys - wanted).forEach { callbacks.remove(it) }
-        sessions.forEach { s ->
-            val pkg = s.packageName ?: return@forEach
-            if (!callbacks.containsKey(pkg)) {
+        (registered.keys - wanted).forEach { pkg ->
+            registered.remove(pkg)?.let { (controller, cb) ->
+                try {
+                    controller.unregisterCallback(cb)
+                } catch (e: Exception) {
+                    Log.w(logTag, "unregister($pkg): ${e.message}")
+                }
+            }
+        }
+        sessions.forEach { c ->
+            val pkg = c.packageName ?: return@forEach
+            if (!registered.containsKey(pkg)) {
                 val cb = object : MediaController.Callback() {
                     override fun onPlaybackStateChanged(state: PlaybackState?) {
                         refresh()
                     }
                 }
                 try {
-                    s.registerCallback(cb, Handler(Looper.getMainLooper()))
-                    callbacks[pkg] = cb
+                    c.registerCallback(cb, Handler(Looper.getMainLooper()))
+                    registered[pkg] = c to cb
                 } catch (e: Exception) {
                     Log.w(logTag, "registerCallback($pkg): ${e.message}")
                 }
@@ -178,7 +189,14 @@ class MediaNotificationListener : NotificationListenerService() {
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         MediaAppTracker.trackingEnabled = false
-        callbacks.clear()
+        registered.values.forEach { (controller, cb) ->
+            try {
+                controller.unregisterCallback(cb)
+            } catch (e: Exception) {
+                Log.w(logTag, "unregister on disconnect: ${e.message}")
+            }
+        }
+        registered.clear()
         MediaAppTracker.reset()
     }
 

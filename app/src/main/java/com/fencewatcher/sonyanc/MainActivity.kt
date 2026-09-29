@@ -436,21 +436,65 @@ class MainActivity : AppCompatActivity() {
 
         val whenSp = spinner(triggers.map { it.label }, triggers.indexOf(base.trigger))
         val doSp = spinner(actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
-        val valueSp = spinner(listOf("Low (5)", "Medium (10)", "High (15)", "Max (20)"), 1)
+        val valueSp = android.widget.Spinner(this).also { linear.addView(it) }
+
+        val levelOptions = listOf(5, 10, 15, 20)
+        val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
+
+        // The value list has to follow the chosen action. It used to be a fixed
+        // 4-item list that SET_MODE and SET_EQ_PRESET silently ignored, so those
+        // two actions could only ever produce "noise cancelling" and "Heavy".
+        fun fillValues(type: Automation.ActionType, select: Int) {
+            val items: List<String> = when (type) {
+                Automation.ActionType.SET_MODE -> Automation.Mode.values().map { it.label }
+                Automation.ActionType.SET_AMBIENT_LEVEL,
+                Automation.ActionType.SET_VOLUME -> levelOptions.map { "$it" }
+                Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
+                else -> emptyList()
+            }
+            valueSp.visibility =
+                if (items.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
+            valueSp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
+                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            valueSp.setSelection(select.coerceIn(0, maxOf(0, items.size - 1)))
+        }
+
+        val initialType = actionTypes[doSp.selectedItemPosition]
+        fillValues(initialType, when (initialType) {
+            Automation.ActionType.SET_MODE ->
+                Automation.Mode.values().indexOf(base.action.mode).coerceAtLeast(0)
+            Automation.ActionType.SET_EQ_PRESET ->
+                eqIds.indexOf(base.action.presetId).let { if (it < 0) 1 else it }
+            Automation.ActionType.SET_AMBIENT_LEVEL, Automation.ActionType.SET_VOLUME ->
+                levelOptions.indexOf(base.action.value).let { if (it < 0) 1 else it }
+            else -> 0
+        })
+
+        doSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                fillValues(actionTypes[pos], 1)
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
 
         val dialog = android.app.AlertDialog.Builder(this)
             .setTitle(if (existingIndex == null) "New rule" else "Edit rule")
             .setView(linear)
             .setPositiveButton("Save") { _, _ ->
                 val type = actionTypes[doSp.selectedItemPosition]
-                val n = listOf(5, 10, 15, 20)[valueSp.selectedItemPosition]
+                val pos = valueSp.selectedItemPosition
                 val action = when (type) {
                     Automation.ActionType.SET_MODE -> Automation.Action(
-                        type = type, mode = Automation.Mode.NC, value = 0,
+                        type = type,
+                        mode = Automation.Mode.values().getOrElse(pos) { Automation.Mode.NC },
                     )
-                    Automation.ActionType.SET_AMBIENT_LEVEL -> Automation.Action(type = type, value = n)
-                    Automation.ActionType.SET_VOLUME -> Automation.Action(type = type, value = n)
-                    Automation.ActionType.SET_EQ_PRESET -> Automation.Action(type = type, presetId = 0x30)
+                    Automation.ActionType.SET_AMBIENT_LEVEL ->
+                        Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
+                    Automation.ActionType.SET_VOLUME ->
+                        Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
+                    Automation.ActionType.SET_EQ_PRESET ->
+                        Automation.Action(type = type, presetId = eqIds.getOrElse(pos) { 0x30 })
                     else -> Automation.Action(type = type)
                 }
                 val rule = base.copy(trigger = triggers[whenSp.selectedItemPosition], action = action)
