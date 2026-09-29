@@ -220,6 +220,11 @@ class EQGraphView @JvmOverloads constructor(
                     draggingBand = best
                     dragStartY = event.y
                     dragStartValue = bandValues[best]
+                    // This view lives inside a ScrollView. Once a drag actually
+                    // starts, the parent must stop intercepting — otherwise a
+                    // vertical finger movement is stolen by the page scroll and
+                    // the dot can never be set precisely.
+                    parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
             }
@@ -236,6 +241,8 @@ class EQGraphView @JvmOverloads constructor(
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 draggingBand = -1
+                // Hand the gesture back so the page can scroll again.
+                parent?.requestDisallowInterceptTouchEvent(false)
                 invalidate()
                 return true
             }

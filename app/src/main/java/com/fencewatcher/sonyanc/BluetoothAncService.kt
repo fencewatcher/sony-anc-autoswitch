@@ -205,11 +205,6 @@ class BluetoothAncService : Service() {
                     }
                 }
 
-                ACTION_ENTER_PAIRING_MODE -> {
-                    val enter = intent.getBooleanExtra("enter", true)
-                    Log.d(tag, "Pairing mode: enter=$enter")
-                    scope.launch { sendFrame(SonyMdrV2.buildPairingModeSet(enter)) }
-                }
 
                 ACTION_RELOAD_AUTOMATION -> reloadAutomation()
             }
@@ -1166,7 +1161,6 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
         const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
-        const val ACTION_ENTER_PAIRING_MODE = "$PACKAGE.action.ENTER_PAIRING_MODE"
         const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
         const val EXTRA_FIX_PLAYBACK = "fix_playback"
 

@@ -436,19 +436,6 @@ object SonyMdrV2 {
         return if (v in VOICE_GUIDANCE_MIN..VOICE_GUIDANCE_MAX) v else null
     }
 
-    // ---- Link control (POWER family, T1) — pairing mode ----
-    //
-    // `PowerNotifyStatusLinkControl` is [command, LINK_CONTROL, EnableDisable],
-    // so the set form is the same three bytes. 0x07 = LINK_CONTROL.
-
-    const val POWER_TYPE_LINK_CONTROL = 0x07
-
-    /** Enter or leave Bluetooth pairing mode. */
-    fun buildPairingModeSet(enter: Boolean): ByteArray = byteArrayOf(
-        CMD_POWER_SET_STATUS.toByte(), POWER_TYPE_LINK_CONTROL.toByte(),
-        if (enter) 0x01 else 0x00,
-    )
-
     // ---- Assignable button / sensor + call capture (T1 SYSTEM) ----
 
     const val SYS_TYPE_CALL_SETTINGS = 0x08

@@ -60,18 +60,32 @@ object MediaAppTracker {
 
     @Synchronized
     fun onPosted(sbn: android.service.notification.StatusBarNotification) {
-        val n = sbn.notification
-        val isMedia = n.category == android.app.Notification.CATEGORY_TRANSPORT ||
-            n.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)
-        if (isMedia) activeNotifications[sbn.packageName] = System.currentTimeMillis()
+        // `getNotification()` and `getExtras()` can both be null for a notification
+        // that was torn down between posting and delivery. Touching either used to
+        // throw an NPE from the listener callback, which takes the whole process
+        // down — and this fires the moment notification access is granted.
+        try {
+            val n = sbn.notification ?: return
+            val isMedia = n.category == android.app.Notification.CATEGORY_TRANSPORT ||
+                n.extras?.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) == true
+            if (isMedia) activeNotifications[sbn.packageName] = System.currentTimeMillis()
+        } catch (e: Exception) {
+            Log.w(TAG, "onPosted(${sbn.packageName}) failed: ${e.message}")
+        }
     }
 
     @Synchronized
     fun onRemoved(sbn: android.service.notification.StatusBarNotification) {
-        val n = sbn.notification
-        val isMedia = n.category == android.app.Notification.CATEGORY_TRANSPORT ||
-            n.extras.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION)
-        if (isMedia) activeNotifications.remove(sbn.packageName)
+        try {
+            val n = sbn.notification
+            val isMedia = n == null ||
+                n.category == android.app.Notification.CATEGORY_TRANSPORT ||
+                n.extras?.containsKey(android.app.Notification.EXTRA_MEDIA_SESSION) == true
+            if (isMedia) activeNotifications.remove(sbn.packageName)
+        } catch (e: Exception) {
+            Log.w(TAG, "onRemoved(${sbn.packageName}) failed: ${e.message}")
+            activeNotifications.remove(sbn.packageName)
+        }
     }
 
     /** Packages that currently have a media notification (hint only, not playback state). */
@@ -203,7 +217,12 @@ class MediaNotificationListener : NotificationListenerService() {
         } catch (e: Exception) {
             Log.w(logTag, "seed replay failed: ${e.message}")
         }
-        publish()
+        try {
+            publish()
+        } catch (e: Exception) {
+            // Never let attribution failure take down the service.
+            Log.e(logTag, "initial publish failed: ${e.message}")
+        }
     }
 
     override fun onListenerDisconnected() {
@@ -223,12 +242,20 @@ class MediaNotificationListener : NotificationListenerService() {
     override fun onNotificationPosted(sbn: android.service.notification.StatusBarNotification) {
         MediaAppTracker.onPosted(sbn)
         // A newly posted media session is a strong hint that playback began.
-        publish()
+        try {
+            publish()
+        } catch (e: Exception) {
+            Log.e(logTag, "publish after post failed: ${e.message}")
+        }
     }
 
     override fun onNotificationRemoved(sbn: android.service.notification.StatusBarNotification) {
         MediaAppTracker.onRemoved(sbn)
-        publish()
+        try {
+            publish()
+        } catch (e: Exception) {
+            Log.e(logTag, "publish after remove failed: ${e.message}")
+        }
     }
 
     companion object {

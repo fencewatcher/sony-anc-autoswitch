@@ -59,7 +59,6 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FIX_PLAYBACK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
@@ -258,11 +257,6 @@ class MainActivity : AppCompatActivity() {
             val next = !playbackFixed
             sendToService(ACTION_SET_FIX_PLAYBACK) { putExtra("fix", next) }
             toast(if (next) "Locking playback to this device" else "Playback lock released")
-        }
-        binding.btnPairingMode.setOnClickListener {
-            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
-            sendToService(ACTION_ENTER_PAIRING_MODE) { putExtra("enter", true) }
-            toast("Pairing mode — hold to exit")
         }
 
         // ---- Headphone feature switches (Table 1 params) ----
