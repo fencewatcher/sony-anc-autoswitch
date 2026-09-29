@@ -236,6 +236,10 @@ class MainActivity : AppCompatActivity() {
             }
             if (intent?.hasExtra(EXTRA_HEADPHONES_WORN) == true) {
                 headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
+                // The wear glyph lives in renderFeatureSwitches, whose only other
+                // call site is setup. Without this it draws once before the first
+                // reply arrives and then never updates.
+                renderFeatureSwitches()
             }
 
             if (intent?.hasExtra(EXTRA_LE_AUDIO) == true) {
@@ -244,10 +248,12 @@ class MainActivity : AppCompatActivity() {
 
             if (intent?.hasExtra(EXTRA_QUICK_ACCESS_FUNCTIONS) == true) {
                 quickAccessFunctions = intent.getIntArrayExtra(EXTRA_QUICK_ACCESS_FUNCTIONS)
+                renderFeatureSwitches()
             }
 
             if (intent?.hasExtra(EXTRA_UPSCALING_STATUS) == true) {
                 upscalingStatus = intent.getIntExtra(EXTRA_UPSCALING_STATUS, 0xFF)
+                renderFeatureSwitches()
             }
 
             // Multipoint + headphone feature state
