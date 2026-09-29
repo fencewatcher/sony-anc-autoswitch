@@ -591,25 +591,24 @@ class BluetoothAncService : Service() {
                             broadcastStats()
                         }
                     }
-                }
-            }
-
-            SonyMdrV2.CMD_PERI_NTFY_STATUS, SonyMdrV2.CMD_PERI_RET_STATUS -> {
-                val pm = SonyMdrV2.decodePairingMode(p)
-                if (pm != null) {
-                    pairingMode = pm
-                    Log.d(tag, "Pairing mode = $pm")
-                    broadcastStats()
-                }
-            }
-
-            SonyMdrV2.CMD_PERI_RET_PARAM, SonyMdrV2.CMD_PERI_NTFY_PARAM -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PERI_TYPE_SOURCE_SWITCH) {
-                    val v = p[2].toInt() and 0xFF
-                    if (v <= 1) {
-                        playbackFixed = v == 0x01
-                        Log.d(tag, "Source-switch control (fix playback) = $playbackFixed")
-                        broadcastStats()
+                    SonyMdrV2.PERI_TYPE_SOURCE_SWITCH -> {
+                        // The wire value is "source switch control ENABLED", the
+                        // NEGATION of playback-fixed. 0x00 = locked, 0x01 = unlocked.
+                        if (p.size >= 3) {
+                            val enabled = p[2].toInt() and 0xFF != 0
+                            playbackFixed = !enabled
+                            Log.d(tag, "Source-switch enabled=$enabled → playbackFixed=$playbackFixed")
+                            // The NTFY variant carries the result code at offset 3; the
+                            // RET variant has no result field. Refusals actually arrive
+                            // here — the 0x3D extended reply is not always sent at all.
+                            if (cmd == SonyMdrV2.CMD_PERI_NTFY_PARAM && p.size >= 4) {
+                                val result = p[3].toInt() and 0xFF
+                                if (result != SonyMdrV2.SOURCE_SWITCH_SUCCESS) {
+                                    Log.w(tag, "Source switch REFUSED result=0x%02x".format(result))
+                                }
+                            }
+                            broadcastStats()
+                        }
                     }
                 }
             }

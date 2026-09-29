@@ -332,9 +332,17 @@ object SonyMdrV2 {
         CMD_PERI_GET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH.toByte(),
     )
 
+    /**
+     * @param fixPlayback true = lock playback to the current device.
+     *   The wire value is "source switch control ENABLED", which is the NEGATION of
+     *   playback-fixed — the reference client says so outright: "Sound Connect's
+     *   'Fixing playback device' is the negation of source switch control" (Client.cpp).
+     *   So locking writes 0x00. Sending 0x01 here still returns result=SUCCESS while
+     *   doing the opposite of what was asked, which is why this went unnoticed.
+     */
     fun buildSourceSwitchControlSet(fixPlayback: Boolean): ByteArray = byteArrayOf(
         CMD_PERI_SET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH.toByte(),
-        if (fixPlayback) 0x01 else 0x00,
+        if (fixPlayback) 0x00 else 0x01,
     )
 
     /** PeripheralInquiredType */
