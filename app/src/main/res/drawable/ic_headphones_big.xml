@@ -1,9 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The previous icon used the Material "headset" glyph, which draws as an open
+  C-shaped arc with a notch and reads as a broken shape rather than headphones.
+  This is a plain over-ear silhouette: headband arc plus two ear cups.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="96dp"
-    android:height="96dp"
+    android:width="72dp"
+    android:height="72dp"
     android:viewportWidth="24"
     android:viewportHeight="24">
     <path
-        android:fillColor="#FFE0E0E0"
-        android:pathData="M12,3C7.03,3 3,7.03 3,12v5c0,1.66 1.34,3 3,3h2V12H6v-0.5c0,-3.31 2.69,-6 6,-6s6,2.69 6,6V12h-2v8h2c1.66,0 3,-1.34 3,-3v-5C21,7.03 16.97,3 12,3zM8,14v5H6c-0.55,0 -1,-0.45 -1,-1v-4H8zM18,14h3v4c0,0.55 -0.45,1 -1,1h-2V14z" />
+        android:fillColor="#FFD8D8D8"
+        android:pathData="M12,2C7.58,2 4,5.58 4,10v8c0,1.66 1.34,3 3,3h3v-9H7v-2c0,-2.76 2.24,-5 5,-5s5,2.24 5,5v2h-3v9h3c1.66,0 3,-1.34 3,-3v-8C20,5.58 16.42,2 12,2zM8,19H7c-0.55,0 -1,-0.45 -1,-1v-5c0,-0.55 0.45,-1 1,-1h1V19zM19,19h-1v-7h1c0.55,0 1,0.45 1,1v5C20,18.55 19.55,19 19,19z" />
 </vector>

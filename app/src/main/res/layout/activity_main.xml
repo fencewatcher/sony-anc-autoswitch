@@ -14,7 +14,12 @@
 
                         <LinearLayout android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:orientation="vertical" android:layout_marginStart="16dp" android:layout_gravity="center_vertical">
 
-                            <TextView android:id="@+id/textModel" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" android:textColor="@color/on_surface" android:text="WH-1000XM6" />
+                            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+
+                                <TextView android:id="@+id/textModel" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textSize="18sp" android:textStyle="bold" android:textColor="@color/on_surface" android:text="WH-1000XM6" />
+
+                                <TextView android:id="@+id/textFeatureStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#FF7FD4A8" android:layout_marginStart="8dp" android:visibility="gone" />
+                            </LinearLayout>
 
                             <TextView android:id="@+id/textStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FFAAAAAA" android:text="—" android:paddingTop="2dp" />
 
@@ -24,8 +29,6 @@
 
                                 <TextView android:id="@+id/textMode" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FF7FD4A8" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:layout_marginStart="8dp" android:text="🎧 —" />
                             </LinearLayout>
-
-                            <TextView android:id="@+id/textFeatureStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FF7FD4A8" android:paddingTop="8dp" android:visibility="gone" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -61,7 +64,7 @@
 
                 <com.google.android.material.card.MaterialCardView android:id="@+id/cardAutoSwitch" android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical" android:paddingHorizontal="16dp" android:paddingVertical="8dp">
 
-                    <TextView android:id="@+id/textAutoSwitch" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="⚡ Auto-switching" android:textSize="14sp" android:textColor="@color/on_surface" />
+                    <TextView android:id="@+id/textAutoSwitch" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:text="⚡ Automations" android:textSize="14sp" android:textColor="@color/on_surface" />
 
                     <Switch android:id="@+id/switchAuto" android:layout_width="wrap_content" android:layout_height="wrap_content" />
                 </LinearLayout></com.google.android.material.card.MaterialCardView>

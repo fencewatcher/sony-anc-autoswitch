@@ -276,13 +276,20 @@ class MainActivity : AppCompatActivity() {
         binding.switchAuto.setOnCheckedChangeListener { _, checked ->
             if (suppressAutoSwitch) return@setOnCheckedChangeListener
             if (!BluetoothAncService.isRunning) {
+                suppressAutoSwitch = true
                 binding.switchAuto.isChecked = !checked
+                suppressAutoSwitch = false
                 toast("Start service first")
                 return@setOnCheckedChangeListener
             }
-            if (checked == autoPaused) return@setOnCheckedChangeListener
+            // The switch reads "automations running", which is the NEGATION of
+            // autoPaused. Assigning autoPaused = checked here inverted the state, so
+            // updatePauseUi() wrote the switch straight back to where it started —
+            // which is why the first tap looked like it did nothing and only the
+            // second one took.
+            if (checked == !autoPaused) return@setOnCheckedChangeListener
             sendToService(ACTION_TOGGLE_AUTO) {}
-            autoPaused = checked
+            autoPaused = !checked
             updatePauseUi()
         }
 
@@ -425,7 +432,7 @@ class MainActivity : AppCompatActivity() {
         suppressAutoSwitch = true
         binding.switchAuto.isChecked = !autoPaused
         suppressAutoSwitch = false
-        binding.textAutoSwitch.text = if (autoPaused) "⏸ Auto-switching paused" else "⚡ Auto-switching"
+        binding.textAutoSwitch.text = if (autoPaused) "⏸ Automations paused" else "⚡ Automations"
         binding.textAutoSwitch.setTextColor(
             if (autoPaused) Color.rgb(255, 198, 92) else Color.rgb(224, 224, 224)
         )

@@ -532,6 +532,11 @@ class BluetoothAncService : Service() {
                     }
                     Log.d(tag, "Headphones report mode: $currentModeName")
                     refreshNotification()
+                    // Without this the UI never learns the mode on connect: the service
+                    // learns it, updates the notification, and goes quiet. The Home chip
+                    // only refreshed when some unrelated broadcast happened to carry
+                    // EXTRA_MODE, which made the stale mode look intermittent.
+                    broadcastStats()
                 }
             }
 
@@ -1066,7 +1071,7 @@ class BluetoothAncService : Service() {
         // Quick stats: battery + current mode
         val stats = buildString {
             if (autoPaused) {
-                append("⏸ Auto-paused")
+                append("⏸ Automations paused")
             } else {
                 if (batteryPercent != null) append("🔋 $batteryPercent%")
                 if (currentModeName != "—") {
@@ -1093,7 +1098,7 @@ class BluetoothAncService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        val displayText = if (autoPaused) "⏸ Auto-paused" else text
+        val displayText = if (autoPaused) "⏸ Automations paused" else text
         val notification = buildNotification(displayText)
         try {
             notificationManager.notify(NOTIFICATION_ID, notification)
@@ -1106,7 +1111,7 @@ class BluetoothAncService : Service() {
     private fun refreshNotification() {
         // Reuse last text by rebuilding with stats (battery/mode changed)
         val base = when {
-            autoPaused -> "⏸ Auto-paused"
+            autoPaused -> "⏸ Automations paused"
             status == Status.CONNECTED -> if (isMediaPlaying) "▶ Playing" else "⏸ Paused"
             status == Status.CONNECTING -> "Connecting…"
             status == Status.DISCONNECTED -> "Disconnected"
