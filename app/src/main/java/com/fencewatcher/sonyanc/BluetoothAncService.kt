@@ -862,6 +862,10 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
         sendFrame(SonyMdrV2.buildLdacStatusGet())
+        // Asked here as well as on the 60s timer: without it the codec stays
+        // unknown until a playback transition or a minute elapses, so the badge
+        // reads empty on a freshly connected app.
+        sendFrame(SonyMdrV2.buildAudioCodecGet())
         // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
         // parameter-notification variant too. Whichever answers, if either, tells
         // us where wearing detection actually lives.

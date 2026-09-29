@@ -938,32 +938,18 @@ class MainActivity : AppCompatActivity() {
                 null -> base
             }
         }
-        // Wear state, from the unsolicited SYSTEM_NTFY_STATUS push. Hidden until
-        // the first event arrives so the tab stays clean on a device that has
-        // not been worn since connecting.
+        // Wear glyph, bottom-right of the hero card. Green on head, yellow off.
+        // Hidden until the first event, since this can only be learned from a push.
         when (headphonesWorn) {
             true -> {
-                binding.textWearState.visibility = android.view.View.VISIBLE
-                binding.textWearState.text = "Wearing: on head"
+                binding.imageWear.visibility = android.view.View.VISIBLE
+                binding.imageWear.imageTintList = android.content.res.ColorStateList.valueOf(0xFF2ECC71.toInt())
             }
             false -> {
-                binding.textWearState.visibility = android.view.View.VISIBLE
-                binding.textWearState.text = "Wearing: off head"
+                binding.imageWear.visibility = android.view.View.VISIBLE
+                binding.imageWear.imageTintList = android.content.res.ColorStateList.valueOf(0xFFF1C40F.toInt())
             }
-            null -> binding.textWearState.visibility = android.view.View.GONE
-        }
-
-        // Codec badge. Only the codec in use right now is shown; the full set of
-        // possible values is handled by SonyMdrV2.codecName so an unrecognised one
-        // still reads as something rather than blanking.
-        val codec = activeCodec
-        if (codec == null) {
-            binding.textCodecBadge.visibility = android.view.View.GONE
-        } else {
-            binding.textCodecBadge.visibility = android.view.View.VISIBLE
-            binding.textCodecBadge.text = SonyMdrV2.codecName(codec)
-            binding.textCodecBadge.backgroundTintList =
-                android.content.res.ColorStateList.valueOf(SonyMdrV2.codecColor(codec))
+            null -> binding.imageWear.visibility = android.view.View.GONE
         }
         updatingUi = false
         renderFeatureStatus()
@@ -972,6 +958,10 @@ class MainActivity : AppCompatActivity() {
     /** Compact "what is switched on right now" line under the headphone card. */
     private fun renderFeatureStatus() {
         val on = buildList {
+            // The codec is a state readout rather than an on/off toggle, but it
+            // belongs with the other chips — it is the first thing worth knowing
+            // about a link, and it also keeps this line visible on its own.
+            activeCodec?.let { add(SonyMdrV2.codecName(it)) }
             if (dseeExtreme) add("DSEE")
             if (bgmMode) add("BGM")
             if (upmixCinema) add("Upmix")
