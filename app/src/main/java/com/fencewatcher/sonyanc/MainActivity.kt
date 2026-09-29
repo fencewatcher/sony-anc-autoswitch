@@ -62,6 +62,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_G
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAIRING_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SWITCH_CONTROL_SUPPORTED
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FIX_PLAYBACK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
@@ -163,6 +164,13 @@ class MainActivity : AppCompatActivity() {
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
+                val swSupported = intent.getBooleanExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, true)
+                binding.btnFixPlayback.isEnabled = swSupported
+                binding.btnFixPlayback.text = when {
+                    !swSupported -> "Fix playback (unsupported)"
+                    playbackFixed -> "Playback locked"
+                    else -> "Fix playback"
+                }
                 pairingModeActive = intent.getBooleanExtra(EXTRA_PAIRING_MODE, false)
                 binding.btnPairingMode.text =
                     if (pairingModeActive) "Leave pairing mode" else "Enter pairing mode"

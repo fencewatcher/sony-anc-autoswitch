@@ -43,6 +43,33 @@ object SonyMdrV2 {
 
     const val CMD_CONNECT_GET_PROTOCOL_INFO = 0x00
     const val CMD_CONNECT_GET_SUPPORT_FUNCTION = 0x06
+    const val CMD_CONNECT_RET_SUPPORT_FUNCTION = 0x07
+
+    /** FunctionType */
+    const val FUNC_SOURCE_SWITCH_CONTROL = 0x01
+
+    /**
+     * Parse the advertised T2 support-function list.
+     *
+     * `ConnectRetSupportFunction` is [command, inquiredType, SupportFunction...] and
+     * each `SupportFunction` is `{functionType, priority}` — a flat two-byte POD
+     * array, so the elements just run back to back from offset 2.
+     *
+     * This list arrives on **connect** (`CONNECT_RET_SUPPORT_FUNCTION`), not on the
+     * peripheral capability query. Parsing `PERI_RET_CAPABILITY` instead — which
+     * carries only max paired/connected counts — can never reveal whether a given
+     * function is supported, which is why a support check on the wrong command
+     * silently did nothing.
+     */
+    fun parseSupportFunctions(p: ByteArray): Set<Int> {
+        val out = LinkedHashSet<Int>()
+        var i = 2
+        while (i + 1 < p.size) {
+            out.add(p[i].toInt() and 0xFF)
+            i += 2
+        }
+        return out
+    }
 
     // ---- Power family (identical in both tables, 0x20..0x29) ----
 

@@ -45,7 +45,28 @@ class MediaPlaybackMonitor(
                 MediaAppTracker.refreshHook?.invoke()
             }
             val rawPlaying = audioManager.isMusicActive
-            val isPlaying = rawPlaying && isAllowedByAllowlist()
+            val allowlist = allowlistProvider()
+            // With an allowlist configured, attribution decides. `isMusicActive`
+            // only reports audio the platform classifies as *music*, so gating the
+            // real answer behind it (`rawPlaying && allowed`) let a weak signal veto
+            // a correct one — a correctly identified Spotify session still showed
+            // nothing happening whenever `isMusicActive` read false.
+            val isPlaying = when {
+                allowlist.isEmpty() -> rawPlaying
+                else -> {
+                    val playing = MediaAppTracker.playingPackages
+                    when {
+                        playing.isNotEmpty() -> playing.any { it in allowlist }
+                        // Nothing attributable. Fall back to `isMusicActive` rather
+                        // than guaranteeing silence, which is what made the filter
+                        // look dead in the first place.
+                        else -> {
+                            if (rawPlaying) Log.w(tag, "no attributable app, but isMusicActive=true — allowing")
+                            rawPlaying
+                        }
+                    }
+                }
+            }
             if (isPlaying != lastReportedPlaying) {
                 pendingCount++
                 if (pendingCount >= DEBOUNCE_COUNT) {
@@ -64,7 +85,7 @@ class MediaPlaybackMonitor(
     fun start() {
         if (polling) return
         polling = true
-        val initialPlaying = audioManager.isMusicActive && isAllowedByAllowlist()
+        val initialPlaying = decide()
         lastReportedPlaying = initialPlaying
         Log.d(tag, "Initial: ${if (initialPlaying) "PLAYING" else "SILENT"}")
         onPlaybackChanged(initialPlaying)
@@ -79,49 +100,19 @@ class MediaPlaybackMonitor(
         MediaAppTracker.refreshHook?.invoke()
     }
 
-    val isAnyPlaying: Boolean
-        get() = audioManager.isMusicActive && isAllowedByAllowlist()
+    val isAnyPlaying: Boolean get() = decide()
+
+    /** Single decision path, so polling and on-demand reads can never disagree. */
+    private fun decide(): Boolean {
+        val allowlist = allowlistProvider()
+        if (allowlist.isEmpty()) return audioManager.isMusicActive
+        val playing = MediaAppTracker.playingPackages
+        return if (playing.isNotEmpty()) playing.any { it in allowlist }
+        else audioManager.isMusicActive
+    }
 
     // ---- App allowlist ----
 
-    /**
-     * Allowlist check based on *real* playback state.
-     *
-     * The previous implementation fell back to the default behaviour most of
-     * the time, for three separate reasons:
-     *
-     *  1. `AudioPlaybackConfiguration.getClientUid()` is a hidden API. Non-SDK
-     *     interface restrictions have blocked that reflection since Android 9,
-     *     so it always returned -1 and the "most accurate" path never ran.
-     *  2. It treated "has a media notification" as "is playing" — but Spotify
-     *     keeps its media notification posted while paused, so a paused app
-     *     still counted as active. This also made ANC trigger spuriously.
-     *  3. With several apps tracked it required *all* of them to be allowed,
-     *     so one lingering notification from a non-allowlisted app blocked
-     *     everything.
-     *
-     * [MediaAppTracker] now derives the playing set from real
-     * `MediaSession` `STATE_PLAYING` through the bound notification listener,
-     * which is accurate on every supported version and event-driven.
-     */
-    private fun isAllowedByAllowlist(): Boolean {
-        val allowlist = allowlistProvider()
-        if (allowlist.isEmpty()) return true  // no filtering
-
-        if (!MediaAppTracker.trackingEnabled) {
-            // Without a bound listener we cannot attribute playback to any app.
-            // This used to allow, which is why the allowlist looked installed but
-            // never filtered anything: the failure mode was indistinguishable
-            // from "no filter". Deny instead, and make the reason loud.
-            Log.w(tag, "tier=deny — allowlist set but notification access is not granted")
-            return false
-        }
-
-        val playing = MediaAppTracker.playingPackages
-        val ok = MediaAppTracker.isAllowed(allowlist)
-        Log.d(tag, "playing=$playing allow=$allowlist allowed=$ok")
-        return ok
-    }
 
     companion object {
         private const val POLL_INTERVAL_MS = 200L

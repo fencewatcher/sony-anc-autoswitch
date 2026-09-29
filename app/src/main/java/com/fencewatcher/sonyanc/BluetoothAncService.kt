@@ -536,6 +536,13 @@ class BluetoothAncService : Service() {
             }
 
             // ---- Table 2 (peripheral / multipoint) ----
+            SonyMdrV2.CMD_CONNECT_RET_SUPPORT_FUNCTION -> {
+                val funcs = SonyMdrV2.parseSupportFunctions(p)
+                sourceSwitchControlSupported = SonyMdrV2.FUNC_SOURCE_SWITCH_CONTROL in funcs
+                Log.d(tag, "T2 support functions: $funcs — sourceSwitchControl=$sourceSwitchControlSupported")
+                broadcastStats()
+            }
+
             SonyMdrV2.CMD_PERI_RET_CAPABILITY -> {
                 peripheralSupported = true
                 Log.d(tag, "Peripheral family present (multipoint available)")
@@ -1116,6 +1123,14 @@ class BluetoothAncService : Service() {
         private set
     var playbackFixed: Boolean = false
         private set
+
+    /**
+     * Null until the headset's advertised T2 support list arrives. False means the
+     * headset does not implement `SOURCE_SWITCH_CONTROL`, so the device silently
+     * ignores the lock and the button has to be disabled.
+     */
+    var sourceSwitchControlSupported: Boolean? = null
+        private set
     var voiceGuidanceVolume: Int = -1
         private set
 
@@ -1157,6 +1172,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
+            sourceSwitchControlSupported?.let { putExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, it) }
             putExtra(EXTRA_PAIRING_MODE, pairingMode)
             putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
             `package` = packageName
@@ -1202,6 +1218,7 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
         const val EXTRA_FIX_PLAYBACK = "fix_playback"
         const val EXTRA_PAIRING_MODE = "pairing_mode"
+        const val EXTRA_SWITCH_CONTROL_SUPPORTED = "switch_control_supported"
 
         const val EXTRA_VOICE_GUIDANCE_VOLUME = "voice_guidance_volume"
 
