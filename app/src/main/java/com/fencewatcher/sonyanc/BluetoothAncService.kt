@@ -814,6 +814,17 @@ class BluetoothAncService : Service() {
      * rather than an assumption baked into the app.
      */
     private suspend fun runAutomation(trigger: Automation.Trigger) {
+        // The single choke point for every automated command, so the pause check
+        // belongs here rather than in one caller. Guarding only onMediaStateChanged
+        // was not enough in two ways:
+        //   - that check runs *before* a 300ms settle delay, so pausing inside
+        //     that window still let the command through;
+        //   - the post-handshake path calls runAutomation directly, with no check
+        //     at all, so a reconnect re-applied rules even while paused.
+        if (autoPaused) {
+            Log.d(tag, "Automations paused — skipping ${trigger.id}")
+            return
+        }
         val rules = automationRules
         val rule = Automation.resolve(rules, trigger)
         if (rule == null) {

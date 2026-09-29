@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  STOP used to render as a full-width 56dp slab of pure red, which did not match
+  the rounded card rows below it. A colour state list keeps the tint handling in
+  one place and gives the disabled state its own tone, so a single background
+  covers both cases.
+-->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_enabled="false" android:color="#FF2E2E2E" />
+    <item android:state_pressed="true" android:color="#FF6B3030" />
+    <item android:color="#FF4A2222" />
+</selector>
