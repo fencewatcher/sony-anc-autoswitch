@@ -756,7 +756,7 @@ class BluetoothAncService : Service() {
                         // XM6 carries the PriorMode byte at index 2; XM5 inserts a
                         // setting-type byte first, so it lands at index 3.
                         val idx = if (subtype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5) 3 else 2
-                        val prior = SonyMdrV2.decodePlainFlag(p, subtype, idx)
+                        val prior = SonyMdrV2.decodePriorMode(p, idx)
                         if (prior != null) {
                             connectionSoundQuality = prior
                             Log.d(tag, "Connection mode: sound quality = $prior")
@@ -792,7 +792,11 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
-        sendFrame(SonyMdrV2.buildSenseCapabilityGet())
+        // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
+        // parameter-notification variant too. Whichever answers, if either, tells
+        // us where wearing detection actually lives.
+        sendFrame(SonyMdrV2.buildSenseCapabilityGet(SonyMdrV2.SENSE_TYPE_ADAPTIVE_CONTROL))
+        sendFrame(SonyMdrV2.buildSenseCapabilityGet(0x01))
         sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
         sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)

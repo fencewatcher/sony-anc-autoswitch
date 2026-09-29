@@ -271,8 +271,8 @@ object SonyMdrV2 {
      * understood well enough to drive, but the command exists and the notification
      * frames are the only way to learn the wearing-detection format on real hardware.
      */
-    fun buildSenseCapabilityGet(): ByteArray =
-        byteArrayOf(CMD_SENSE_GET_CAPABILITY.toByte(), SENSE_TYPE_ADAPTIVE_CONTROL.toByte())
+    fun buildSenseCapabilityGet(type: Int = SENSE_TYPE_ADAPTIVE_CONTROL): ByteArray =
+        byteArrayOf(CMD_SENSE_GET_CAPABILITY.toByte(), type.toByte())
 
     // ---- Speak-to-chat (T1, SYSTEM + SYSTEM_EXT) ----
 
@@ -527,6 +527,19 @@ object SonyMdrV2 {
             else -> null
         }
     }
+
+    /**
+     * PriorMode is an enum, not a boolean flag. Decoding it with a plain on/off
+     * flag helper reports 0x00 (SOUND_QUALITY_PRIOR) as "off", which is what
+     * made the connection-mode toggle appear stuck on connection priority: the
+     * frame round-tripped fine, the answer was simply read backwards.
+     */
+    fun decodePriorMode(p: ByteArray, valueIndex: Int = 2): Boolean? =
+        when (p.getOrNull(valueIndex)?.toInt()?.and(0xFF)) {
+            PRIOR_SOUND_QUALITY -> true
+            PRIOR_CONNECTION_QUALITY -> false
+            else -> null
+        }
 
     /** For params whose enable byte is plain: 0x01 = on. See [buildUpscalingSet]. */
     fun decodePlainFlag(p: ByteArray, subtype: Int, valueIndex: Int = 2): Boolean? {
