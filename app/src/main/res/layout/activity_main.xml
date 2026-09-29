@@ -23,6 +23,8 @@
                                 <TextView android:id="@+id/textBattery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FFCCCCCC" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:text="—" />
 
                                 <TextView android:id="@+id/textMode" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FF7FD4A8" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:layout_marginStart="8dp" android:text="—" />
+
+                <TextView android:id="@+id/textSenseDebug" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#FF6E6E6E" android:paddingTop="6dp" android:text="SENSE: no frame yet" android:visibility="gone" />
                             </LinearLayout>
                         </LinearLayout>
                     </LinearLayout>

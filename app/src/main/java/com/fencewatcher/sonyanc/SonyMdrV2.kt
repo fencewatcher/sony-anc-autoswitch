@@ -186,14 +186,28 @@ object SonyMdrV2 {
     const val AUDIO_TYPE_BGM_MODE = 0x03
     const val AUDIO_TYPE_UPMIX_CINEMA = 0x04
     const val AUDIO_TYPE_BGM_AND_ERRORCODE = 0x09
-    // Connection mode. XM6 and XM5 disagree on the type byte for the same
-    // feature, and the XM5 frame has an extra setting-type field the XM6 one
-    // does not — verified against libmdr ProtocolV1T1/V2T1.
-    const val AUDIO_TYPE_CONNECTION_MODE_XM6 = 0x05 // CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO
-    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // CONNECTION_MODE
+    // Connection mode. XM6 and XM5 disagree on the type byte, and — the bit that
+    // actually broke it — XM6 uses a *different* type for the set than for the
+    // readback: AudioSetParamConnection sends CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO
+    // (0x05) while AudioRetParamConnection answers as CONNECTION_MODE (0x00).
+    // Asking for 0x05 and decoding 0x05 meant the read never matched and the
+    // spinner never left its old value.
+    const val AUDIO_TYPE_CONNECTION_MODE_XM6_SET = 0x05 // set only
+    const val AUDIO_TYPE_CONNECTION_MODE_XM6_READ = 0x00 // read/ret
+    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // both directions
     const val CONNECTION_SETTING_SOUND_CONNECTION = 0x00 // XM5 only
     const val PRIOR_SOUND_QUALITY = 0x00
     const val PRIOR_CONNECTION_QUALITY = 0x01
+
+    // ---- SENSE (wearing / adaptive control) — observed, not yet driven ----
+
+    const val CMD_SENSE_GET_CAPABILITY = 0x70
+    const val CMD_SENSE_RET_CAPABILITY = 0x71
+    const val CMD_SENSE_NTFY_STATUS = 0x75
+    const val CMD_SENSE_NTFY_PARAM = 0x79
+    const val CMD_SENSE_GET_EXT_INFO = 0x7A
+    const val CMD_SENSE_RET_EXT_INFO = 0x7B
+    const val SENSE_TYPE_ADAPTIVE_CONTROL = 0x00
 
     /** Enable byte for the listening-mode params is **inverted** on the wire. */
     fun inverted(on: Boolean) = if (on) 0x00 else 0x01
@@ -233,19 +247,32 @@ object SonyMdrV2 {
      */
     fun buildConnectionModeGet(xm5: Boolean): ByteArray = byteArrayOf(
         CMD_AUDIO_GET_PARAM.toByte(),
-        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte(),
+        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6_READ).toByte(),
     )
 
     fun buildConnectionModeSet(xm5: Boolean, soundQualityPrior: Boolean): ByteArray {
         val prior = (if (soundQualityPrior) PRIOR_SOUND_QUALITY else PRIOR_CONNECTION_QUALITY).toByte()
-        val type = (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte()
-        // XM5 is [cmd, type, settingType, prior]; XM6 is [cmd, type, prior, pad].
-        return if (xm5) {
-            byteArrayOf(CMD_AUDIO_SET_PARAM.toByte(), type, CONNECTION_SETTING_SOUND_CONNECTION.toByte(), prior)
-        } else {
-            byteArrayOf(CMD_AUDIO_SET_PARAM.toByte(), type, prior, 0x00)
+        // XM5: [cmd, type, settingType, prior] — it really does carry the extra byte.
+        if (xm5) {
+            return byteArrayOf(
+                CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM5.toByte(),
+                CONNECTION_SETTING_SOUND_CONNECTION.toByte(), prior,
+            )
         }
+        // XM6: [cmd, type, prior]. An earlier revision padded a fourth byte here and
+        // the headphones rejected the frame, which is why the toggle looked stuck.
+        return byteArrayOf(
+            CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM6_SET.toByte(), prior,
+        )
     }
+
+    /**
+     * Read-only SENSE probes. The XM6 SENSE semantics (ADAPTIVE_CONTROL) are not
+     * understood well enough to drive, but the command exists and the notification
+     * frames are the only way to learn the wearing-detection format on real hardware.
+     */
+    fun buildSenseCapabilityGet(): ByteArray =
+        byteArrayOf(CMD_SENSE_GET_CAPABILITY.toByte(), SENSE_TYPE_ADAPTIVE_CONTROL.toByte())
 
     // ---- Speak-to-chat (T1, SYSTEM + SYSTEM_EXT) ----
 

@@ -51,6 +51,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_CONNECTION_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SENSE_DEBUG
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -108,6 +109,9 @@ class MainActivity : AppCompatActivity() {
     /** null until the headphones answer the connection-mode inquiry. */
     private var connectionSoundQuality: Boolean? = null
     private var connectionSpinnerReady = false
+
+    /** Last raw SENSE frame from the service, shown on Home for wearing-detection work. */
+    private var senseDebug: String? = null
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -175,6 +179,9 @@ class MainActivity : AppCompatActivity() {
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 if (intent.hasExtra(EXTRA_CONNECTION_MODE)) {
                     connectionSoundQuality = intent.getBooleanExtra(EXTRA_CONNECTION_MODE, true)
+                }
+                if (intent.hasExtra(EXTRA_SENSE_DEBUG)) {
+                    senseDebug = intent.getStringExtra(EXTRA_SENSE_DEBUG)
                 }
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
@@ -866,6 +873,15 @@ class MainActivity : AppCompatActivity() {
             } else {
                 "Connection priority — favours stability and range over audio quality."
             }
+        }
+        // Wearing-detection debug: hidden until the headphones actually answer, so
+        // the Home tab stays clean on a device that never emits a SENSE frame.
+        val sense = senseDebug
+        if (sense.isNullOrBlank() || sense == "no SENSE frame yet") {
+            binding.textSenseDebug.visibility = android.view.View.GONE
+        } else {
+            binding.textSenseDebug.visibility = android.view.View.VISIBLE
+            binding.textSenseDebug.text = "SENSE: $sense"
         }
         updatingUi = false
         renderFeatureStatus()

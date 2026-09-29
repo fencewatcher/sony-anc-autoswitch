@@ -751,7 +751,7 @@ class BluetoothAncService : Service() {
                         bgmMode = flag
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6_READ,
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
                         // XM6 carries the PriorMode byte at index 2; XM5 inserts a
                         // setting-type byte first, so it lands at index 3.
@@ -763,6 +763,18 @@ class BluetoothAncService : Service() {
                         }
                     }
                 }
+                broadcastStats()
+            }
+
+            // SENSE (wearing / adaptive control). Not driven yet — the XM6
+            // semantics are not understood well enough to write to. Captured raw
+            // so the format can be learned from real hardware instead of guessed.
+            SonyMdrV2.CMD_SENSE_RET_CAPABILITY,
+            SonyMdrV2.CMD_SENSE_NTFY_STATUS,
+            SonyMdrV2.CMD_SENSE_NTFY_PARAM,
+            SonyMdrV2.CMD_SENSE_RET_EXT_INFO -> {
+                senseDebug = p.joinToString(" ") { "0x%02X".format(it) }
+                Log.d(tag, "SENSE frame: ${senseDebug}")
                 broadcastStats()
             }
         }
@@ -780,6 +792,7 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        sendFrame(SonyMdrV2.buildSenseCapabilityGet())
         sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
         sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
@@ -1274,6 +1287,10 @@ class BluetoothAncService : Service() {
     var connectionSoundQuality: Boolean? = null
         private set
 
+    /** Last raw SENSE frame seen, for the Home debug line. */
+    var senseDebug: String = "no SENSE frame yet"
+        private set
+
     /** True when the connected model uses the V1 (XM5) wire format. */
     private fun isXm5(): Boolean = profile == HeadphoneProfile.Xm5
 
@@ -1340,6 +1357,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
         connectionSoundQuality?.let { putExtra(EXTRA_CONNECTION_MODE, it) }
+        putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
             sourceSwitchControlSupported?.let { putExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, it) }
@@ -1413,6 +1431,9 @@ class BluetoothAncService : Service() {
 
         /** Tri-state: true = sound quality, false = connection, absent = unknown. */
         const val EXTRA_CONNECTION_MODE = "connection_mode"
+
+        /** Last raw SENSE frame, hex, for the Home debug line. */
+        const val EXTRA_SENSE_DEBUG = "sense_debug"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
