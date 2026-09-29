@@ -97,6 +97,33 @@ class BluetoothAncService : Service() {
     @Volatile
     private var powerOffRequested = false
     private var deviceAddress: String? = null
+
+    /**
+     * Consecutive connect failures, deliberately a field rather than a local.
+     *
+     * It used to be local to connectBluetooth, so every triggerReconnect reset it
+     * to zero and the backoff never accumulated across cycles. With the headphones
+     * powered off the socket would open, hit EOF straight away and reconnect with
+     * no delay at all, forever. It now only resets on a successful connect.
+     */
+    private var connectFailures = 0
+    private var lastConnectAttemptAt = 0L
+
+    /**
+     * Reconnects when the headphones come back at the Bluetooth profile level,
+     * so giving up does not mean staying dead until the user presses Start.
+     */
+    private val aclReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            if (intent?.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
+            @Suppress("DEPRECATION")
+            val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            if (dev.address != deviceAddress) return
+            connectFailures = 0
+            Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
+            triggerReconnect()
+        }
+    }
     private var batteryPercent: Int? = null
 
     /** Latch for the battery-low trigger, so it fires once per crossing. */
@@ -116,6 +143,15 @@ class BluetoothAncService : Service() {
         super.onCreate()
         automationRules = Automation.load(this)
         createNotificationChannel()
+        // Resume automatically when the headphones come back, so that giving up
+        // on the retry cycle does not mean staying disconnected until Start is
+        // pressed again.
+        runCatching {
+            registerReceiver(
+                aclReceiver,
+                android.content.IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED),
+            )
+        }
         Log.d(tag, "Service created")
     }
 
@@ -406,6 +442,7 @@ class BluetoothAncService : Service() {
             btSocket?.close()
         } catch (_: Exception) {}
         connectionJob?.cancel()
+        runCatching { unregisterReceiver(aclReceiver) }
         scope.cancel()
         super.onDestroy()
     }
@@ -460,11 +497,11 @@ class BluetoothAncService : Service() {
     // ---- Bluetooth connection (runs on IO dispatcher) ----
 
     private fun connectBluetooth(address: String) {
+        lastConnectAttemptAt = android.os.SystemClock.elapsedRealtime()
         connectionJob?.cancel()
         connectionJob = scope.launch {
-            var retries = 0
 
-            while (isActive && retries < MAX_RETRIES) {
+            while (isActive && connectFailures < MAX_RETRIES) {
                 try {
                     val adapter = BluetoothAdapter.getDefaultAdapter()
                     if (adapter == null) {
@@ -527,7 +564,7 @@ class BluetoothAncService : Service() {
                     updateNotification("Connected")
                     seqT1 = 0            // Reset seq on every fresh connection
                     seqT2 = 0
-                    retries = 0          // Reset retry counter on success
+                    connectFailures = 0   // Reset the failure count on success
 
                     // The read loop has to be running before the handshake: request()
                     // waits for a reply, and with nothing draining the socket every
@@ -657,8 +694,8 @@ class BluetoothAncService : Service() {
 
                     if (!isActive) break
 
-                    retries++
-                    val delay = RETRY_DELAY_MS * (1L shl (retries - 1).coerceAtMost(4))
+                    connectFailures++
+                    val delay = RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
                     updateNotification("Reconnecting in ${delay / 1000}s…")
                     delay(delay)
                 }
@@ -669,9 +706,12 @@ class BluetoothAncService : Service() {
                 broadcastStatus(status)
                 updateNotification("Stopped")
             } else {
-                status = Status.ERROR
-                broadcastStatus(status, "All $MAX_RETRIES connection retries failed")
-                updateNotification("Connection failed")
+                status = Status.DISCONNECTED
+                // Not a fault: most often the headphones are simply powered off.
+                // Waiting for the Bluetooth profile to report them back beats
+                // hammering the stack every few seconds.
+                broadcastStatus(status, "Headphones off — waiting")
+                updateNotification("Headphones off — waiting")
             }
         }
     }
@@ -1486,7 +1526,14 @@ class BluetoothAncService : Service() {
             btSocket?.close()
         } catch (_: Exception) {}
         btSocket = null
-        connectBluetooth(addr)
+        // Honour the backoff instead of firing immediately. Without this an
+        // open-then-EOF socket spun the connect loop with nothing in between.
+        val since = android.os.SystemClock.elapsedRealtime() - lastConnectAttemptAt
+        val wait = (RETRY_DELAY_MS - since).coerceAtLeast(0L)
+        scope.launch {
+            if (wait > 0) delay(wait)
+            connectBluetooth(addr)
+        }
     }
 
     // ---- Notifications ----
