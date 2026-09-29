@@ -158,6 +158,10 @@
         </LinearLayout>
 
         <TextView android:id="@+id/textConnectionStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FFAAAAAA" android:text="Sound quality lets the headphones prefer LDAC or aptX when the phone offers them. Connection priority favours stability and range." />
+
+        <Switch android:id="@+id/switchLeAudio" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LE Audio transport" android:textSize="13sp" android:textColor="#FFCCCCCC" android:paddingTop="10dp" android:visibility="gone" />
+
+        <TextView android:id="@+id/textLeAudioNote" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#FF888888" android:visibility="gone" />
     </LinearLayout>
 </com.google.android.material.card.MaterialCardView></LinearLayout></ScrollView><ScrollView android:id="@+id/devicesContent" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:visibility="gone"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:paddingHorizontal="@dimen/content_gutter" android:paddingVertical="16dp"><com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="DEVICE" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="8dp" />
 

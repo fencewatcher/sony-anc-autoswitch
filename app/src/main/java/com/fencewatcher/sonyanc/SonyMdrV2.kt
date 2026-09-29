@@ -227,6 +227,33 @@ object SonyMdrV2 {
 
     fun isWorn(v: Int): Boolean = v == WEAR_NORMAL
 
+    // ---- LE Audio transport (T1) ----
+    //
+    // Distinct from connection mode (0x02) despite sharing the Audio group.
+    // Both values are independent EnableDisable flags, so the payload is four
+    // bytes, not three. Confirmed from the decompiled app: the reader side lives
+    // in .../tandem/features/connectionmode.
+    const val AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO = 0x05
+    const val CMD_SYSTEM_GET_STATUS_T1 = 0xF2
+
+    fun buildLeAudioStatusGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_STATUS_T1.toByte(), AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO.toByte())
+
+    /**
+     * Switching transport forces the headphones to drop the Bluetooth link, so
+     * the caller should expect a reconnect.
+     *
+     * Which flag means what is inferred from the reader: one flag for LE Audio,
+     * one for Classic Audio, mutually exclusive. The readback is the authority —
+     * if this sends the pair the wrong way round, the displayed state still comes
+     * from the device rather than from our guess.
+     */
+    fun buildLeAudioSet(leAudioOn: Boolean, classicAudioOn: Boolean): ByteArray = byteArrayOf(
+        CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO.toByte(),
+        (if (leAudioOn) 0x00 else 0x01).toByte(),
+        (if (classicAudioOn) 0x00 else 0x01).toByte(),
+    )
+
     /** [buildAudioCodecGet] — the codec actually in use right now. */
     fun buildAudioCodecGet(): ByteArray =
         byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_AUDIO_CODEC.toByte())

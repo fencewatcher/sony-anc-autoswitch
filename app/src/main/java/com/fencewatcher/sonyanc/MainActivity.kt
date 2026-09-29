@@ -55,6 +55,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SENSE_DEBUG
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LDAC_ACTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ACTIVE_CODEC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_HEADPHONES_WORN
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LE_AUDIO
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -135,6 +136,12 @@ class MainActivity : AppCompatActivity() {
      * next frame instead, and only guards this one spinner.
      */
     private var suppressConnectionCallback = false
+
+    /** Same guard for the LE Audio switch, which also fires its listener async. */
+    private var suppressLeCallback = false
+
+    /** LE Audio transport active, or null until reported. */
+    private var leAudio: Boolean? = null
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -197,6 +204,10 @@ class MainActivity : AppCompatActivity() {
             }
             if (intent?.hasExtra(EXTRA_HEADPHONES_WORN) == true) {
                 headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
+            }
+
+            if (intent?.hasExtra(EXTRA_LE_AUDIO) == true) {
+                leAudio = intent.getBooleanExtra(EXTRA_LE_AUDIO, false)
             }
 
             // Multipoint + headphone feature state
@@ -453,6 +464,11 @@ class MainActivity : AppCompatActivity() {
                 debugTaps = 0
                 startActivity(android.content.Intent(this, DebugActivity::class.java))
             }
+        }
+
+        binding.switchLeAudio.setOnCheckedChangeListener { _, checked ->
+            if (!connectionSpinnerReady || suppressLeCallback) return@setOnCheckedChangeListener
+            sendToService(BluetoothAncService.ACTION_SET_LE_AUDIO) { putExtra("le_audio", checked) }
         }
 
         // Connection mode: sound quality vs connection stability. This picks a
@@ -956,6 +972,25 @@ class MainActivity : AppCompatActivity() {
                 binding.imageWear.imageTintList = android.content.res.ColorStateList.valueOf(0xFFF1C40F.toInt())
             }
             null -> binding.imageWear.visibility = android.view.View.GONE
+        }
+
+        // LE Audio transport. Hidden until the headphones report it, so the card
+        // stays clean on hardware that never answers the status query.
+        val le = leAudio
+        if (le == null) {
+            binding.switchLeAudio.visibility = android.view.View.GONE
+            binding.textLeAudioNote.visibility = android.view.View.GONE
+        } else {
+            binding.switchLeAudio.visibility = android.view.View.VISIBLE
+            binding.textLeAudioNote.visibility = android.view.View.VISIBLE
+            if (binding.switchLeAudio.isChecked != le) {
+                suppressLeCallback = true
+                binding.switchLeAudio.isChecked = le
+                binding.switchLeAudio.post { suppressLeCallback = false }
+            }
+            binding.textLeAudioNote.text =
+                if (le) "LE Audio active — switching drops the Bluetooth link briefly."
+                else "Classic Bluetooth audio."
         }
         updatingUi = false
         renderFeatureStatus()

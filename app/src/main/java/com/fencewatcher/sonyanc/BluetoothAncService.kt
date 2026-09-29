@@ -221,6 +221,17 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+                ACTION_SET_LE_AUDIO -> {
+                    val on = intent.getBooleanExtra("le_audio", false)
+                    scope.launch {
+                        // Re-read after the switch: the transport change drops the
+                        // link, so the reply may not arrive until it is back.
+                        sendFrame(SonyMdrV2.buildLeAudioSet(on, !on))
+                        delay(2500L)
+                        sendFrame(SonyMdrV2.buildLeAudioStatusGet())
+                    }
+                }
+
                 ACTION_SET_CONNECTION_MODE -> {
                     val soundQuality = intent.getBooleanExtra("sound_quality", true)
                     scope.launch {
@@ -483,6 +494,7 @@ class BluetoothAncService : Service() {
                             sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
                             sendFrame(SonyMdrV2.buildAudioCodecGet())
                             sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
+                            sendFrame(SonyMdrV2.buildLeAudioStatusGet())
                             delay(500L)
                             runAutomation(currentPlaybackTrigger())
                         }
@@ -802,10 +814,29 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            // Wear status, T2: [0xF3, 0x00, WearingStatusCode]. The authority.
+            // SYSTEM_RET_STATUS (0xF3) serves two different features on two
+            // different tables, sharing one command byte. Dispatch on table
+            // first, then type: T1 0x00 is plain CONNECTION_MODE status, which
+            // is not wear state despite looking identical on the wire.
             SonyMdrV2.CMD_SYSTEM_RET_STATUS_T2 -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.T2_TYPE_WEARING_STATUS_CHECKER) {
-                    applyWearCode(p[2].toInt() and 0xFF)
+                val type = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                val table = SonyMdrV2.Table.of(frame.dataType)
+                when {
+                    table == SonyMdrV2.Table.T2 &&
+                        type == SonyMdrV2.T2_TYPE_WEARING_STATUS_CHECKER && p.size >= 3 ->
+                        applyWearCode(p[2].toInt() and 0xFF)
+
+                    // LE Audio transport, T1: [0xF3, 0x05, leFlag, classicFlag].
+                    table == SonyMdrV2.Table.T1 &&
+                        type == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO && p.size >= 4 -> {
+                        val le = SonyMdrV2.decodeInvertedEnable(p[2].toInt() and 0xFF)
+                        val classic = SonyMdrV2.decodeInvertedEnable(p[3].toInt() and 0xFF)
+                        if (le != null && le != leAudioActive) {
+                            leAudioActive = le
+                            Log.d(tag, "LE Audio: $le (classic: $classic)")
+                            broadcastStats()
+                        }
+                    }
                 }
             }
 
@@ -864,6 +895,7 @@ class BluetoothAncService : Service() {
         // reads empty on a freshly connected app.
         sendFrame(SonyMdrV2.buildAudioCodecGet())
         sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
+        sendFrame(SonyMdrV2.buildLeAudioStatusGet())
         // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
         // parameter-notification variant too. Whichever answers, if either, tells
         // us where wearing detection actually lives.
@@ -1456,15 +1488,25 @@ class BluetoothAncService : Service() {
     var headphonesWorn: Boolean? = null
         private set
 
+    /**
+     * LE Audio transport active, or null until reported. Switching this forces
+     * the headphones to drop the Bluetooth link and re-establish it.
+     */
+    var leAudioActive: Boolean? = null
+        private set
+
     private fun applyWearCode(code: Int) {
-        if (code == wearStatusCode) return
+        val changed = code != wearStatusCode
         wearStatusCode = code
         val worn = SonyMdrV2.isWorn(code)
-        val changed = worn != headphonesWorn
+        val wearChanged = worn != headphonesWorn
         headphonesWorn = worn
-        Log.d(tag, "Wear status: ${SonyMdrV2.wearStatusName(code)}")
+        if (changed) Log.d(tag, "Wear status: ${SonyMdrV2.wearStatusName(code)}")
+        // Broadcast unconditionally. The activity can miss the first one — it may
+        // still be starting, or be recreated later — so skipping this when the
+        // value is unchanged left the glyph blank until the next real don/doff.
         broadcastStats()
-        if (changed) {
+        if (changed && wearChanged) {
             scope.launch {
                 runAutomation(
                     if (worn) Automation.Trigger.HEADPHONES_ON
@@ -1547,6 +1589,7 @@ class BluetoothAncService : Service() {
         ldacActive?.let { putExtra(EXTRA_LDAC_ACTIVE, it) }
         activeCodec?.let { putExtra(EXTRA_ACTIVE_CODEC, it) }
         headphonesWorn?.let { putExtra(EXTRA_HEADPHONES_WORN, it) }
+        leAudioActive?.let { putExtra(EXTRA_LE_AUDIO, it) }
         putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
@@ -1630,11 +1673,15 @@ class BluetoothAncService : Service() {
 
         const val EXTRA_ACTIVE_CODEC = "active_codec"
         const val EXTRA_HEADPHONES_WORN = "headphones_worn"
+        const val EXTRA_LE_AUDIO = "le_audio"
 
         const val FRAME_LOG_BROADCAST = "$PACKAGE.action.FRAME_LOG"
         const val EXTRA_FRAME_LOG = "frame_log"
         const val ACTION_SEND_RAW = "$PACKAGE.action.SEND_RAW"
         const val ACTION_CLEAR_FRAME_LOG = "$PACKAGE.action.CLEAR_FRAME_LOG"
+
+        /** Switch the LE Audio / Classic Audio transport. Expect a reconnect. */
+        const val ACTION_SET_LE_AUDIO = "$PACKAGE.action.SET_LE_AUDIO"
 
         /** Re-send the current log without clearing it. */
         const val ACTION_GET_FRAME_LOG = "$PACKAGE.action.GET_FRAME_LOG"
