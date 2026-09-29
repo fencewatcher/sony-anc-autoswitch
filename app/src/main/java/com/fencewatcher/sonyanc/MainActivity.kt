@@ -162,6 +162,9 @@ class MainActivity : AppCompatActivity() {
 
     private var suppressQaCallback = false
 
+    /** Last array actually written, so a repeated selection does not rewrite it. */
+    private var lastSentQa: IntArray? = null
+
     private var renderScheduled = false
 
     /**
@@ -194,6 +197,9 @@ class MainActivity : AppCompatActivity() {
             spinner.setSelection(idx, false)
             spinner.post { suppressQaCallback = false }
         }
+        // A new value has arrived from the device, so the next user selection is a
+        // real change rather than a replay of what is already stored.
+        lastSentQa = null
     }
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
@@ -564,6 +570,10 @@ class MainActivity : AppCompatActivity() {
                 val out = base.copyOf(maxOf(base.size, 2))
                 out[0] = qaValues[binding.spinnerQaLeft.selectedItemPosition]
                 out[1] = qaValues[binding.spinnerQaRight.selectedItemPosition]
+                // Both spinners fire their initial callback, so the same array used to
+                // be written twice back to back with consecutive sequence numbers.
+                if (out.contentEquals(lastSentQa)) return
+                lastSentQa = out
                 sendToService(BluetoothAncService.ACTION_SET_QUICK_ACCESS) {
                     putExtra("functions", out)
                 }

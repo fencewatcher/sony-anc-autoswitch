@@ -952,44 +952,49 @@ class BluetoothAncService : Service() {
 
     /** Query everything we can display, on both command tables. */
     private suspend fun queryAllState() {
+        // The headset silently drops the tail of a long burst. A 30 frame sweep sent
+        // back to back answers the first handful and then nothing: codec, wear, LE
+        // audio, Quick Access and DSEE all get no reply at all. The same commands in a
+        // seven frame batch answer inside 400ms. So the sweep is paced — every frame
+        // gets a turn before the next is written.
+        suspend fun q(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
+            delay(50L)
+            q(payload, table)
+        }
+
         // Table 1 — main features
-        sendFrame(byteArrayOf(SonyMdrV2.CMD_NCASM_GET_PARAM.toByte(), SonyMdrV2.NCASM_SUBTYPE_STANDARD.toByte()))
-        sendFrame(SonyMdrV2.buildAutoPowerOffGet())
-        sendFrame(SonyMdrV2.buildSpeakToChatGet())
-        sendFrame(SonyMdrV2.buildPauseWhenTakenOffGet())
-        sendFrame(SonyMdrV2.buildSpeakToChatConfigGet())
-        sendFrame(SonyMdrV2.buildUpscalingGet())
-        sendFrame(SonyMdrV2.buildBgmGet())
-        sendFrame(SonyMdrV2.buildUpmixGet())
-        sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
-        sendFrame(SonyMdrV2.buildLdacStatusGet())
+        q(byteArrayOf(SonyMdrV2.CMD_NCASM_GET_PARAM.toByte(), SonyMdrV2.NCASM_SUBTYPE_STANDARD.toByte()))
+        q(SonyMdrV2.buildAutoPowerOffGet())
+        q(SonyMdrV2.buildSpeakToChatGet())
+        q(SonyMdrV2.buildPauseWhenTakenOffGet())
+        q(SonyMdrV2.buildSpeakToChatConfigGet())
+        q(SonyMdrV2.buildUpscalingGet())
+        q(SonyMdrV2.buildBgmGet())
+        q(SonyMdrV2.buildUpmixGet())
+        q(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        q(SonyMdrV2.buildLdacStatusGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
-        sendFrame(SonyMdrV2.buildAudioCodecGet())
-        sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
-        sendFrame(SonyMdrV2.buildLeAudioStatusGet())
-        sendFrame(SonyMdrV2.buildQuickAccessEnableGet())
-        sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
-        sendFrame(SonyMdrV2.buildUpscalingStatusGet())
-        // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
-        // parameter-notification variant too. Whichever answers, if either, tells
-        // us where wearing detection actually lives.
-        sendFrame(SonyMdrV2.buildSenseCapabilityGet(SonyMdrV2.SENSE_TYPE_ADAPTIVE_CONTROL))
-        sendFrame(SonyMdrV2.buildSenseCapabilityGet(0x01))
-        sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+        q(SonyMdrV2.buildAudioCodecGet())
+        q(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildLeAudioStatusGet())
+        q(SonyMdrV2.buildQuickAccessEnableGet())
+        q(SonyMdrV2.buildQuickAccessFunctionGet())
+        q(SonyMdrV2.buildUpscalingStatusGet())
+        q(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
-        sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
         delay(120)
-        sendFrame(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
         delay(120)
-        sendFrame(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
         delay(120)
-        sendFrame(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
         delay(120)
-        sendFrame(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
         delay(120)
-        sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+        q(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
     }
 
     /** Re-read the multipoint list (used after a successful source switch). */
