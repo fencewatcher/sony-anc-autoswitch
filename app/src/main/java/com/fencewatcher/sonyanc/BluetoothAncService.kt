@@ -202,6 +202,15 @@ class BluetoothAncService : Service() {
                     scope.launch { sendFrame(SonyMdrV2.buildUpmixSet(on)) }
                 }
 
+                ACTION_SET_CONNECTION_MODE -> {
+                    val soundQuality = intent.getBooleanExtra("sound_quality", true)
+                    scope.launch {
+                        sendFrame(SonyMdrV2.buildConnectionModeSet(isXm5(), soundQuality))
+                        delay(150L)
+                        sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
+                    }
+                }
+
                 ACTION_SET_AUTO_POWER -> {
                     val mode = intent.getIntExtra("mode", 0x11)
                     scope.launch { sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode)) }
@@ -742,6 +751,17 @@ class BluetoothAncService : Service() {
                         bgmMode = flag
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
+                        // XM6 carries the PriorMode byte at index 2; XM5 inserts a
+                        // setting-type byte first, so it lands at index 3.
+                        val idx = if (subtype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5) 3 else 2
+                        val prior = SonyMdrV2.decodePlainFlag(p, subtype, idx)
+                        if (prior != null) {
+                            connectionSoundQuality = prior
+                            Log.d(tag, "Connection mode: sound quality = $prior")
+                        }
+                    }
                 }
                 broadcastStats()
             }
@@ -759,6 +779,7 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildUpscalingGet())
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
+        sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
         sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
         sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
@@ -1249,6 +1270,13 @@ class BluetoothAncService : Service() {
     var upmixCinema: Boolean = false
         private set
 
+    /** null until the headphones answer our inquiry. */
+    var connectionSoundQuality: Boolean? = null
+        private set
+
+    /** True when the connected model uses the V1 (XM5) wire format. */
+    private fun isXm5(): Boolean = profile == HeadphoneProfile.Xm5
+
     /** True = "Fix Playback": multipoint will not hand the audio over. */
 
     /** True while the headphones are in Bluetooth pairing (inquiry scan) mode. */
@@ -1311,6 +1339,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DSEE, dseeExtreme)
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
+        connectionSoundQuality?.let { putExtra(EXTRA_CONNECTION_MODE, it) }
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
             sourceSwitchControlSupported?.let { putExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, it) }
@@ -1356,6 +1385,9 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_DSEE = "$PACKAGE.action.SET_DSEE"
         const val ACTION_SET_BGM = "$PACKAGE.action.SET_BGM"
         const val ACTION_SET_UPMIX = "$PACKAGE.action.SET_UPMIX"
+
+        /** "sound_quality" boolean extra: true = prioritise audio, false = stability. */
+        const val ACTION_SET_CONNECTION_MODE = "$PACKAGE.action.SET_CONNECTION_MODE"
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
         const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
@@ -1378,6 +1410,9 @@ class BluetoothAncService : Service() {
         const val EXTRA_DSEE = "dsee"
         const val EXTRA_BGM = "bgm"
         const val EXTRA_UPMIX = "upmix"
+
+        /** Tri-state: true = sound quality, false = connection, absent = unknown. */
+        const val EXTRA_CONNECTION_MODE = "connection_mode"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"

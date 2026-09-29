@@ -50,6 +50,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPMIX
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_CONNECTION_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -59,6 +60,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_PAUSE_T
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_DSEE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_CONNECTION_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
@@ -102,6 +104,10 @@ class MainActivity : AppCompatActivity() {
     private var dseeExtreme = false
     private var bgmMode = false
     private var upmixCinema = false
+
+    /** null until the headphones answer the connection-mode inquiry. */
+    private var connectionSoundQuality: Boolean? = null
+    private var connectionSpinnerReady = false
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -167,6 +173,9 @@ class MainActivity : AppCompatActivity() {
                 dseeExtreme = intent.getBooleanExtra(EXTRA_DSEE, false)
                 bgmMode = intent.getBooleanExtra(EXTRA_BGM, false)
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
+                if (intent.hasExtra(EXTRA_CONNECTION_MODE)) {
+                    connectionSoundQuality = intent.getBooleanExtra(EXTRA_CONNECTION_MODE, true)
+                }
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
                 if (intent.hasExtra(EXTRA_AUTO_PAUSED)) {
@@ -381,6 +390,22 @@ class MainActivity : AppCompatActivity() {
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
         autoPowerSpinnerReady = true
+
+        // Connection mode: sound quality vs connection stability. This picks a
+        // *priority*, not a codec — the active codec is negotiated with the phone
+        // and the protocol has no command to force LDAC/aptX.
+        val connAdapter = ArrayAdapter<String>(this, android.R.layout.simple_spinner_item)
+        connAdapter.addAll("Sound quality", "Connection priority")
+        connAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerConnectionMode.adapter = connAdapter
+        binding.spinnerConnectionMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (!connectionSpinnerReady || updatingUi) return
+                sendToService(ACTION_SET_CONNECTION_MODE) { putExtra("sound_quality", pos == 0) }
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        connectionSpinnerReady = true
 
         // ---- Automations ----
         loadAutomation()
@@ -833,6 +858,14 @@ class MainActivity : AppCompatActivity() {
             val idx = listOf(SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF, SonyMdrV2.AutoPowerOff.NEVER)
                 .indexOf(autoPowerOffMode)
             if (idx >= 0) binding.spinnerAutoPower.setSelection(idx)
+        }
+        connectionSoundQuality?.let { sq ->
+            binding.spinnerConnectionMode.setSelection(if (sq) 0 else 1)
+            binding.textConnectionStatus.text = if (sq) {
+                "Sound quality — the headphones may use LDAC or aptX when the phone offers them."
+            } else {
+                "Connection priority — favours stability and range over audio quality."
+            }
         }
         updatingUi = false
         renderFeatureStatus()

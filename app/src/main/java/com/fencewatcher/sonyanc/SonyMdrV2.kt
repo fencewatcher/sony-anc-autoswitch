@@ -186,6 +186,14 @@ object SonyMdrV2 {
     const val AUDIO_TYPE_BGM_MODE = 0x03
     const val AUDIO_TYPE_UPMIX_CINEMA = 0x04
     const val AUDIO_TYPE_BGM_AND_ERRORCODE = 0x09
+    // Connection mode. XM6 and XM5 disagree on the type byte for the same
+    // feature, and the XM5 frame has an extra setting-type field the XM6 one
+    // does not — verified against libmdr ProtocolV1T1/V2T1.
+    const val AUDIO_TYPE_CONNECTION_MODE_XM6 = 0x05 // CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO
+    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // CONNECTION_MODE
+    const val CONNECTION_SETTING_SOUND_CONNECTION = 0x00 // XM5 only
+    const val PRIOR_SOUND_QUALITY = 0x00
+    const val PRIOR_CONNECTION_QUALITY = 0x01
 
     /** Enable byte for the listening-mode params is **inverted** on the wire. */
     fun inverted(on: Boolean) = if (on) 0x00 else 0x01
@@ -213,6 +221,31 @@ object SonyMdrV2 {
     fun buildUpmixSet(on: Boolean): ByteArray = byteArrayOf(
         CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_UPMIX_CINEMA.toByte(), inverted(on).toByte(),
     )
+
+    // ---- Connection mode (sound quality vs connection stability) ----
+
+    /**
+     * Note this chooses *priority*, not a codec. The protocol has no command to
+     * force LDAC/aptX; the active codec is negotiated with the phone and only
+     * readable, not selectable. The reference confirms the two are separate:
+     * [PriorMode] here is the same pair Sony's app calls sound-quality-priority
+     * vs connection-priority.
+     */
+    fun buildConnectionModeGet(xm5: Boolean): ByteArray = byteArrayOf(
+        CMD_AUDIO_GET_PARAM.toByte(),
+        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte(),
+    )
+
+    fun buildConnectionModeSet(xm5: Boolean, soundQualityPrior: Boolean): ByteArray {
+        val prior = (if (soundQualityPrior) PRIOR_SOUND_QUALITY else PRIOR_CONNECTION_QUALITY).toByte()
+        val type = (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte()
+        // XM5 is [cmd, type, settingType, prior]; XM6 is [cmd, type, prior, pad].
+        return if (xm5) {
+            byteArrayOf(CMD_AUDIO_SET_PARAM.toByte(), type, CONNECTION_SETTING_SOUND_CONNECTION.toByte(), prior)
+        } else {
+            byteArrayOf(CMD_AUDIO_SET_PARAM.toByte(), type, prior, 0x00)
+        }
+    }
 
     // ---- Speak-to-chat (T1, SYSTEM + SYSTEM_EXT) ----
 
