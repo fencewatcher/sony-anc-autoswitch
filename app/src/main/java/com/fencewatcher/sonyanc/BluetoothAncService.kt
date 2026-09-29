@@ -221,6 +221,20 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+                ACTION_SET_QUICK_ACCESS -> {
+                    val fns = intent.getIntArrayExtra("functions")
+                    if (fns == null || fns.isEmpty()) {
+                        Log.w(tag, "Quick Access write with no functions")
+                    } else {
+                        scope.launch {
+                            sendFrame(SonyMdrV2.buildQuickAccessFunctionSet(fns))
+                            delay(200L)
+                            // Read back rather than trusting what we sent.
+                            sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
+                        }
+                    }
+                }
+
                 ACTION_SET_LE_AUDIO -> {
                     val on = intent.getBooleanExtra("le_audio", false)
                     scope.launch {
@@ -495,6 +509,9 @@ class BluetoothAncService : Service() {
                             sendFrame(SonyMdrV2.buildAudioCodecGet())
                             sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
                             sendFrame(SonyMdrV2.buildLeAudioStatusGet())
+                            sendFrame(SonyMdrV2.buildQuickAccessEnableGet())
+                            sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
+                            sendFrame(SonyMdrV2.buildUpscalingStatusGet())
                             delay(500L)
                             runAutomation(currentPlaybackTrigger())
                         }
@@ -741,6 +758,18 @@ class BluetoothAncService : Service() {
                         pauseWhenTakenOff = flag
                         Log.d(tag, "Pause when taken off: $pauseWhenTakenOff")
                     }
+                    // Quick Access: [0D, count, fn...]. Positional, no key byte —
+                    // index 0 is the left button, 1 the right.
+                    SonyMdrV2.SYS_TYPE_QUICK_ACCESS -> if (p.size >= 3) {
+                        val n = p[2].toInt() and 0xFF
+                        val fns = IntArray(n) { p[3 + it].toInt() and 0xFF }
+                        quickAccessFunctions = fns
+                        Log.d(
+                            tag, "Quick Access: " +
+                                fns.joinToString(", ") { SonyMdrV2.quickAccessName(it) },
+                        )
+                        broadcastStats()
+                    }
                 }
                 broadcastStats()
             }
@@ -803,14 +832,31 @@ class BluetoothAncService : Service() {
 
             // Active codec: [0x13, 0x02, codec]. Only meaningful with a live
             // stream — idle the XM6 reports AAC, playing reports LDAC.
+            // COMMON_RET_STATUS / COMMON_NTFY_STATUS. Codec is type 0x02, upscaling
+            // is 0x03 — same command byte, so dispatch on the type byte.
             SonyMdrV2.CMD_COMMON_RET_STATUS, 0x15 -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.COMMON_TYPE_AUDIO_CODEC) {
-                    val c = p[2].toInt() and 0xFF
-                    if (c != activeCodec) {
-                        activeCodec = c
-                        Log.d(tag, "Active codec: ${SonyMdrV2.codecName(c)}")
+                val subtype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                when {
+                    subtype == SonyMdrV2.COMMON_TYPE_AUDIO_CODEC && p.size >= 3 -> {
+                        val c = p[2].toInt() and 0xFF
+                        if (c != activeCodec) {
+                            activeCodec = c
+                            Log.d(tag, "Active codec: ${SonyMdrV2.codecName(c)}")
+                        }
+                        broadcastStats()
                     }
-                    broadcastStats()
+                    subtype == SonyMdrV2.COMMON_TYPE_UPSCALING_EFFECT && p.size >= 4 -> {
+                        val st = p[3].toInt() and 0xFF
+                        if (st != upscalingStatus) {
+                            upscalingStatus = st
+                            Log.d(
+                                tag, "Upscaling: effect 0x%02x %s".format(
+                                    p[2].toInt() and 0xFF, SonyMdrV2.upscalingStatusName(st),
+                                ),
+                            )
+                            broadcastStats()
+                        }
+                    }
                 }
             }
 
@@ -837,6 +883,17 @@ class BluetoothAncService : Service() {
                             broadcastStats()
                         }
                     }
+
+                    // Quick Access master enable, T1: [0xF3, 0x0D, enable].
+                    table == SonyMdrV2.Table.T1 &&
+                        type == SonyMdrV2.SYS_TYPE_QUICK_ACCESS && p.size >= 3 -> {
+                        val en = SonyMdrV2.decodeInvertedEnable(p[2].toInt() and 0xFF)
+                        if (en != null && en != quickAccessEnabled) {
+                            quickAccessEnabled = en
+                            Log.d(tag, "Quick Access enabled: $en")
+                            broadcastStats()
+                        }
+                    }
                 }
             }
 
@@ -844,8 +901,17 @@ class BluetoothAncService : Service() {
             // don/doff, so it is useful as an early "something changed" hint.
             // Re-ask T2 rather than reading a value off it.
             SonyMdrV2.CMD_SYSTEM_NTFY_STATUS -> {
-                if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.SYS_TYPE_HEAD_GESTURE_TRAINING) {
+                val subtype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                if (subtype == SonyMdrV2.SYS_TYPE_HEAD_GESTURE_TRAINING && p.size >= 4) {
                     scope.launch { sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2) }
+                }
+                if (subtype == SonyMdrV2.SYS_TYPE_QUICK_ACCESS && p.size >= 3) {
+                    val en = SonyMdrV2.decodeInvertedEnable(p[2].toInt() and 0xFF)
+                    if (en != null && en != quickAccessEnabled) {
+                        quickAccessEnabled = en
+                        Log.d(tag, "Quick Access enabled: $en")
+                        broadcastStats()
+                    }
                 }
             }
 
@@ -896,6 +962,9 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildAudioCodecGet())
         sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
         sendFrame(SonyMdrV2.buildLeAudioStatusGet())
+        sendFrame(SonyMdrV2.buildQuickAccessEnableGet())
+        sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
+        sendFrame(SonyMdrV2.buildUpscalingStatusGet())
         // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
         // parameter-notification variant too. Whichever answers, if either, tells
         // us where wearing detection actually lives.
@@ -1495,6 +1564,18 @@ class BluetoothAncService : Service() {
     var leAudioActive: Boolean? = null
         private set
 
+    /** Quick Access master enable, or null until reported. */
+    var quickAccessEnabled: Boolean? = null
+        private set
+
+    /** Per-button quick access functions. Index 0 = left, 1 = right. */
+    var quickAccessFunctions: IntArray? = null
+        private set
+
+    /** DSEE/upscaling effect status, or null until reported. No reason field exists. */
+    var upscalingStatus: Int? = null
+        private set
+
     private fun applyWearCode(code: Int) {
         val changed = code != wearStatusCode
         wearStatusCode = code
@@ -1590,6 +1671,9 @@ class BluetoothAncService : Service() {
         activeCodec?.let { putExtra(EXTRA_ACTIVE_CODEC, it) }
         headphonesWorn?.let { putExtra(EXTRA_HEADPHONES_WORN, it) }
         leAudioActive?.let { putExtra(EXTRA_LE_AUDIO, it) }
+        quickAccessEnabled?.let { putExtra(EXTRA_QUICK_ACCESS_ENABLED, it) }
+        quickAccessFunctions?.let { putExtra(EXTRA_QUICK_ACCESS_FUNCTIONS, it) }
+        upscalingStatus?.let { putExtra(EXTRA_UPSCALING_STATUS, it) }
         putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
@@ -1674,6 +1758,9 @@ class BluetoothAncService : Service() {
         const val EXTRA_ACTIVE_CODEC = "active_codec"
         const val EXTRA_HEADPHONES_WORN = "headphones_worn"
         const val EXTRA_LE_AUDIO = "le_audio"
+        const val EXTRA_QUICK_ACCESS_ENABLED = "quick_access_enabled"
+        const val EXTRA_QUICK_ACCESS_FUNCTIONS = "quick_access_functions"
+        const val EXTRA_UPSCALING_STATUS = "upscaling_status"
 
         const val FRAME_LOG_BROADCAST = "$PACKAGE.action.FRAME_LOG"
         const val EXTRA_FRAME_LOG = "frame_log"
@@ -1682,6 +1769,9 @@ class BluetoothAncService : Service() {
 
         /** Switch the LE Audio / Classic Audio transport. Expect a reconnect. */
         const val ACTION_SET_LE_AUDIO = "$PACKAGE.action.SET_LE_AUDIO"
+
+        /** Assign quick access functions. Extra "functions" as an int array. */
+        const val ACTION_SET_QUICK_ACCESS = "$PACKAGE.action.SET_QUICK_ACCESS"
 
         /** Re-send the current log without clearing it. */
         const val ACTION_GET_FRAME_LOG = "$PACKAGE.action.GET_FRAME_LOG"

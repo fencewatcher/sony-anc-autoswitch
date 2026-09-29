@@ -227,6 +227,66 @@ object SonyMdrV2 {
 
     fun isWorn(v: Int): Boolean = v == WEAR_NORMAL
 
+    // ---- Quick Access (T1, type 0x0D) ----
+    //
+    // Traced from the decompiled app. Layout is [F8, 0D, count, fn...] with an
+    // unsigned count and no key byte; the button is positional (index 0 = left,
+    // 1 = right) and the write is whole-array.
+    //
+    // Caution: these are the values on the wire. The app also has a `Function`
+    // enum in a different numeric space (sptf = 66, not 1) that nothing converts
+    // between — do not mix the two.
+    const val QUICK_ACCESS_NONE = 0x00
+    const val QUICK_ACCESS_SPTF = 0x01
+    const val QUICK_ACCESS_XIAO = 0x04
+    const val QUICK_ACCESS_QMSC_DIRECT = 0x07
+
+    fun buildQuickAccessEnableGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_STATUS_T1.toByte(), SYS_TYPE_QUICK_ACCESS.toByte())
+
+    fun buildQuickAccessFunctionGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_QUICK_ACCESS.toByte())
+
+    fun buildQuickAccessFunctionSet(functions: IntArray): ByteArray {
+        val out = ByteArray(3 + functions.size)
+        out[0] = CMD_SYSTEM_SET_PARAM.toByte()
+        out[1] = SYS_TYPE_QUICK_ACCESS.toByte()
+        out[2] = (functions.size and 0xFF).toByte()
+        for (i in functions.indices) out[3 + i] = (functions[i] and 0xFF).toByte()
+        return out
+    }
+
+    /**
+     * Only `sptf` → Spotify is a confident identification. `xiao` and
+     * `qMscDirect` are internal names whose user-facing meaning is not
+     * recoverable from the code, so they are shown raw rather than guessed at.
+     */
+    fun quickAccessName(v: Int): String = when (v) {
+        QUICK_ACCESS_NONE -> "None"
+        QUICK_ACCESS_SPTF -> "Spotify"
+        else -> "0x%02x".format(v)
+    }
+
+    // ---- Upscaling / DSEE indicator (T1, COMMON group type 0x03) ----
+    //
+    // Sibling of the codec read, which is 12 02 on the same command. Confirmed
+    // there is NO disable-reason field for this feature: StatusDisableReason in
+    // the app belongs to the party-speaker and heart-rate-sensor features only.
+    const val COMMON_TYPE_UPSCALING_EFFECT = 0x03
+    const val UPSCALING_STATUS_OFF = 0x00
+    const val UPSCALING_STATUS_VALID = 0x01
+    const val UPSCALING_STATUS_INVALID = 0x02
+
+    fun buildUpscalingStatusGet(): ByteArray =
+        byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_UPSCALING_EFFECT.toByte())
+
+    fun upscalingStatusName(v: Int): String = when (v) {
+        UPSCALING_STATUS_OFF -> "off"
+        UPSCALING_STATUS_VALID -> "valid"
+        UPSCALING_STATUS_INVALID -> "invalid"
+        else -> "0x%02x".format(v)
+    }
+
     // ---- LE Audio transport (T1) ----
     //
     // Distinct from connection mode (0x02) despite sharing the Audio group.

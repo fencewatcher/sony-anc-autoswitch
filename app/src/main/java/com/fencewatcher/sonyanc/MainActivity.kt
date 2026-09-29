@@ -56,6 +56,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LDAC_ACTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ACTIVE_CODEC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_HEADPHONES_WORN
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LE_AUDIO
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_QUICK_ACCESS_FUNCTIONS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPSCALING_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -142,6 +144,36 @@ class MainActivity : AppCompatActivity() {
 
     /** LE Audio transport active, or null until reported. */
     private var leAudio: Boolean? = null
+
+    /** Quick access functions as reported. Index 0 = left, 1 = right. */
+    private var quickAccessFunctions: IntArray? = null
+
+    /** DSEE/upscaling status, or null until reported. */
+    private var upscalingStatus: Int? = null
+
+    /** The four wire values the app is known to send, in menu order. */
+    private val qaValues = intArrayOf(
+        SonyMdrV2.QUICK_ACCESS_NONE,
+        SonyMdrV2.QUICK_ACCESS_SPTF,
+        SonyMdrV2.QUICK_ACCESS_XIAO,
+        SonyMdrV2.QUICK_ACCESS_QMSC_DIRECT,
+    )
+
+    private var suppressQaCallback = false
+
+    /**
+     * Show a reported function value without firing the write listener. An
+     * unmapped value leaves the spinner alone rather than silently snapping to a
+     * different assignment.
+     */
+    private fun bindQaSpinner(spinner: android.widget.Spinner, value: Int) {
+        val idx = qaValues.indexOf(value)
+        if (idx >= 0 && spinner.selectedItemPosition != idx) {
+            suppressQaCallback = true
+            spinner.setSelection(idx, false)
+            spinner.post { suppressQaCallback = false }
+        }
+    }
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -208,6 +240,14 @@ class MainActivity : AppCompatActivity() {
 
             if (intent?.hasExtra(EXTRA_LE_AUDIO) == true) {
                 leAudio = intent.getBooleanExtra(EXTRA_LE_AUDIO, false)
+            }
+
+            if (intent?.hasExtra(EXTRA_QUICK_ACCESS_FUNCTIONS) == true) {
+                quickAccessFunctions = intent.getIntArrayExtra(EXTRA_QUICK_ACCESS_FUNCTIONS)
+            }
+
+            if (intent?.hasExtra(EXTRA_UPSCALING_STATUS) == true) {
+                upscalingStatus = intent.getIntExtra(EXTRA_UPSCALING_STATUS, 0xFF)
             }
 
             // Multipoint + headphone feature state
@@ -465,6 +505,36 @@ class MainActivity : AppCompatActivity() {
                 startActivity(android.content.Intent(this, DebugActivity::class.java))
             }
         }
+
+        binding.spinnerQaLeft.adapter = android.widget.ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            qaValues.map { SonyMdrV2.quickAccessName(it) },
+        )
+        binding.spinnerQaRight.adapter = android.widget.ArrayAdapter(
+            this, android.R.layout.simple_spinner_dropdown_item,
+            qaValues.map { SonyMdrV2.quickAccessName(it) },
+        )
+        val qaListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(
+                parent: android.widget.AdapterView<*>?, view: android.view.View?,
+                position: Int, id: Long,
+            ) {
+                if (suppressQaCallback || !connectionSpinnerReady) return
+                // The write is whole-array, so keep any entries beyond L and R intact.
+                val base = quickAccessFunctions
+                    ?: intArrayOf(SonyMdrV2.QUICK_ACCESS_NONE, SonyMdrV2.QUICK_ACCESS_NONE)
+                val out = base.copyOf(maxOf(base.size, 2))
+                out[0] = qaValues[binding.spinnerQaLeft.selectedItemPosition]
+                out[1] = qaValues[binding.spinnerQaRight.selectedItemPosition]
+                sendToService(BluetoothAncService.ACTION_SET_QUICK_ACCESS) {
+                    putExtra("functions", out)
+                }
+            }
+
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) = Unit
+        }
+        binding.spinnerQaLeft.onItemSelectedListener = qaListener
+        binding.spinnerQaRight.onItemSelectedListener = qaListener
 
         binding.switchLeAudio.setOnCheckedChangeListener { _, checked ->
             if (!connectionSpinnerReady || suppressLeCallback) return@setOnCheckedChangeListener
@@ -960,6 +1030,23 @@ class MainActivity : AppCompatActivity() {
                 null -> base
             }
         }
+        // Quick Access. Hidden until the device answers: the model gate is
+        // negotiated at runtime and could not be confirmed for the XM6 from the
+        // app, so the control only appears on hardware that actually reports it.
+        val fns = quickAccessFunctions
+        if (fns == null) {
+            binding.quickAccessGroup.visibility = android.view.View.GONE
+        } else {
+            binding.quickAccessGroup.visibility = android.view.View.VISIBLE
+            bindQaSpinner(binding.spinnerQaLeft, fns.getOrNull(0) ?: SonyMdrV2.QUICK_ACCESS_NONE)
+            bindQaSpinner(binding.spinnerQaRight, fns.getOrNull(1) ?: SonyMdrV2.QUICK_ACCESS_NONE)
+        }
+
+        upscalingStatus?.let { st ->
+            binding.textUpscaling.visibility = android.view.View.VISIBLE
+            binding.textUpscaling.text = "DSEE effect: " + SonyMdrV2.upscalingStatusName(st)
+        }
+
         // Wear glyph, bottom-right of the hero card. Green on head, yellow off.
         // Hidden until the first event, since this can only be learned from a push.
         when (headphonesWorn) {
