@@ -28,14 +28,22 @@ class MediaPlaybackMonitor(
     private val audioManager: AudioManager =
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
 
-    private var lastReportedPlaying: Boolean? = null
+    var lastReportedPlaying: Boolean? = null
     private var pendingCount = 0
     private var polling = false
+    private var lastAttributionMs = 0L
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val pollRunnable = object : Runnable {
         override fun run() {
             if (!polling) return
+            // Re-derive which app is playing before deciding. Throttled because
+            // each call is a binder round-trip enumerating every active session.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastAttributionMs >= ATTRIBUTION_INTERVAL_MS) {
+                lastAttributionMs = now
+                MediaAppTracker.refreshHook?.invoke()
+            }
             val rawPlaying = audioManager.isMusicActive
             val isPlaying = rawPlaying && isAllowedByAllowlist()
             if (isPlaying != lastReportedPlaying) {
@@ -67,6 +75,8 @@ class MediaPlaybackMonitor(
         polling = false
         mainHandler.removeCallbacks(pollRunnable)
         lastReportedPlaying = null
+        lastAttributionMs = 0L
+        MediaAppTracker.refreshHook?.invoke()
     }
 
     val isAnyPlaying: Boolean
@@ -115,6 +125,8 @@ class MediaPlaybackMonitor(
 
     companion object {
         private const val POLL_INTERVAL_MS = 200L
+        /** How often to re-derive the playing app. Each call is a binder round-trip. */
+        private const val ATTRIBUTION_INTERVAL_MS = 500L
         /** Require this many consecutive polls with the same state before reporting a change (≈1s). */
         private const val DEBOUNCE_COUNT = 5
     }
