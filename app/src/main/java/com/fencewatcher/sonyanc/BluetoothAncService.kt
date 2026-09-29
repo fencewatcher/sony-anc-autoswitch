@@ -49,6 +49,9 @@ class BluetoothAncService : Service() {
     private var powerOffRequested = false
     private var deviceAddress: String? = null
     private var batteryPercent: Int? = null
+
+    /** Latch for the battery-low trigger, so it fires once per crossing. */
+    private var batteryLowFired = false
     private var currentModeName: String = "—"
     @Volatile
     private var autoPaused = false
@@ -543,6 +546,15 @@ class BluetoothAncService : Service() {
                     batteryPercent = p[2].toInt() and 0xFF
                     Log.d(tag, "Battery: $batteryPercent%")
                     refreshNotification()
+                    // Fire only on the crossing, not on every 60s poll — otherwise a
+                    // rule bound to "battery low" would re-run every minute.
+                    val low = batteryPercent!! < BATTERY_LOW_THRESHOLD
+                    if (low && !batteryLowFired) {
+                        batteryLowFired = true
+                        scope.launch { runAutomation(Automation.Trigger.BATTERY_LOW) }
+                    } else if (!low) {
+                        batteryLowFired = false
+                    }
                 }
             }
             0x67, 0x69 -> {  // NCASM RET / NTFY — mode may have changed on-device
@@ -895,8 +907,47 @@ class BluetoothAncService : Service() {
                 delay(120L)
                 sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
             }
+            // The remaining headphone features. Each reuses the exact builder the
+            // Audio tab uses, so a routine and a manual toggle cannot drift apart.
+            Automation.ActionType.SET_SPEAK_TO_CHAT ->
+                sendFrame(SonyMdrV2.buildSpeakToChatSet(rule.action.value != 0))
+            Automation.ActionType.SET_PAUSE_TAKEN_OFF ->
+                sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(rule.action.value != 0))
+            Automation.ActionType.SET_DSEE ->
+                sendFrame(SonyMdrV2.buildUpscalingSet(rule.action.value != 0))
+            Automation.ActionType.SET_BGM ->
+                sendFrame(SonyMdrV2.buildBgmSet(rule.action.value != 0))
+            Automation.ActionType.SET_UPMIX ->
+                sendFrame(SonyMdrV2.buildUpmixSet(rule.action.value != 0))
+            // These two live in the ambient payload rather than a command of their
+            // own, so the stored pref is flipped and the ambient frame re-sent —
+            // same path as applyAmbientNow(), just driven by a rule.
+            Automation.ActionType.SET_VOICE_PASSTHROUGH -> {
+                setAmbientFlag("voice_passthrough", rule.action.value != 0)
+                sendFrame(sonyAmbientCommand())
+            }
+            Automation.ActionType.SET_AUTO_AMBIENT -> {
+                setAmbientFlag("auto_ambient", rule.action.value != 0)
+                sendFrame(sonyAmbientCommand())
+            }
+            Automation.ActionType.SET_AUTO_POWER -> {
+                val mode = if (rule.action.power == Automation.AutoPower.NEVER)
+                    SonyMdrV2.AutoPowerOff.NEVER else SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF
+                sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode))
+            }
+            Automation.ActionType.SET_VOICE_GUIDANCE -> {
+                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(rule.action.value), SonyMdrV2.Table.T2)
+                delay(120L)
+                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+            }
         }
         refreshNotification()
+    }
+
+    /** Persist an ambient flag so the ambient frame picks it up next time. */
+    private fun setAmbientFlag(key: String, on: Boolean) {
+        val addr = deviceAddress ?: return
+        prefs().edit().putBoolean("${key}_$addr", on).apply()
     }
 
     private fun currentPlaybackTrigger(): Automation.Trigger =
@@ -1290,6 +1341,9 @@ class BluetoothAncService : Service() {
         const val ACTION_ANC_ON = "$PACKAGE.action.ANC_ON"
         const val ACTION_AMBIENT = "$PACKAGE.action.AMBIENT"
         const val ACTION_APPLY_AMBIENT = "$PACKAGE.action.APPLY_AMBIENT"
+
+        /** Percentage at or below which the battery-low automation trigger fires. */
+        const val BATTERY_LOW_THRESHOLD = 20
         const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
         const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"

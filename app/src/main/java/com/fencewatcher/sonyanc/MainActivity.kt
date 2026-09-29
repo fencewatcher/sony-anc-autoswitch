@@ -604,6 +604,15 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.SET_MODE,
             Automation.ActionType.SET_AMBIENT_LEVEL,
             Automation.ActionType.SET_EQ_PRESET,
+            Automation.ActionType.SET_SPEAK_TO_CHAT,
+            Automation.ActionType.SET_PAUSE_TAKEN_OFF,
+            Automation.ActionType.SET_DSEE,
+            Automation.ActionType.SET_BGM,
+            Automation.ActionType.SET_UPMIX,
+            Automation.ActionType.SET_VOICE_PASSTHROUGH,
+            Automation.ActionType.SET_AUTO_AMBIENT,
+            Automation.ActionType.SET_AUTO_POWER,
+            Automation.ActionType.SET_VOICE_GUIDANCE,
         )
         val base = existingIndex?.let { automationRules[it] }
             ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START, Automation.Action())
@@ -633,11 +642,14 @@ class MainActivity : AppCompatActivity() {
         // 4-item list that SET_MODE and SET_EQ_PRESET silently ignored, so those
         // two actions could only ever produce "noise cancelling" and "Heavy".
         fun fillValues(type: Automation.ActionType, select: Int) {
-            val items: List<String> = when (type) {
-                Automation.ActionType.SET_MODE -> Automation.Mode.values().map { it.label }
-                Automation.ActionType.SET_AMBIENT_LEVEL,
-                Automation.ActionType.SET_VOLUME -> levelOptions.map { "$it" }
-                Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
+            val items: List<String> = when {
+                type in Automation.ActionType.TOGGLES -> listOf("On", "Off")
+                type == Automation.ActionType.SET_AUTO_POWER ->
+                    Automation.AutoPower.values().map { it.label }
+                type == Automation.ActionType.SET_VOICE_GUIDANCE -> levelOptions.map { "$it" }
+                type == Automation.ActionType.SET_MODE -> Automation.Mode.values().map { it.label }
+                type == Automation.ActionType.SET_AMBIENT_LEVEL -> levelOptions.map { "$it" }
+                type == Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
                 else -> emptyList()
             }
             valueSp.visibility =
@@ -654,8 +666,12 @@ class MainActivity : AppCompatActivity() {
                 Automation.Mode.values().indexOf(base.action.mode).coerceAtLeast(0)
             Automation.ActionType.SET_EQ_PRESET ->
                 eqIds.indexOf(base.action.presetId).let { if (it < 0) 1 else it }
-            Automation.ActionType.SET_AMBIENT_LEVEL, Automation.ActionType.SET_VOLUME ->
+            Automation.ActionType.SET_AUTO_POWER ->
+                Automation.AutoPower.values().indexOf(base.action.power).coerceAtLeast(0)
+            Automation.ActionType.SET_AMBIENT_LEVEL,
+            Automation.ActionType.SET_VOICE_GUIDANCE ->
                 levelOptions.indexOf(base.action.value).let { if (it < 0) 1 else it }
+            in Automation.ActionType.TOGGLES -> if (base.action.value != 0) 0 else 1
             else -> 0
         })
 
@@ -679,10 +695,16 @@ class MainActivity : AppCompatActivity() {
                     )
                     Automation.ActionType.SET_AMBIENT_LEVEL ->
                         Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
-                    Automation.ActionType.SET_VOLUME ->
+                    Automation.ActionType.SET_VOICE_GUIDANCE ->
                         Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
                     Automation.ActionType.SET_EQ_PRESET ->
                         Automation.Action(type = type, presetId = eqIds.getOrElse(pos) { 0x30 })
+                    Automation.ActionType.SET_AUTO_POWER -> Automation.Action(
+                        type = type,
+                        power = Automation.AutoPower.values().getOrElse(pos) { Automation.AutoPower.WHEN_TAKEN_OFF },
+                    )
+                    in Automation.ActionType.TOGGLES ->
+                        Automation.Action(type = type, value = if (pos == 0) 1 else 0)
                     else -> Automation.Action(type = type)
                 }
                 val rule = base.copy(trigger = triggers[whenSp.selectedItemPosition], action = action)

@@ -28,7 +28,8 @@ object Automation {
         PLAYBACK_START("playback_start", "Playback starts"),
         PLAYBACK_STOP("playback_stop", "Playback stops"),
         DEVICE_CONNECTED("device_connected", "Headphones connect"),
-        DEVICE_DISCONNECTED("device_disconnected", "Headphones disconnect");
+        DEVICE_DISCONNECTED("device_disconnected", "Headphones disconnect"),
+        BATTERY_LOW("battery_low", "Battery drops below 20%");
 
         companion object {
             fun from(id: String) = values().firstOrNull { it.id == id } ?: PLAYBACK_START
@@ -42,10 +43,37 @@ object Automation {
         SET_MODE("set_mode", "Set noise control"),
         SET_AMBIENT_LEVEL("set_ambient_level", "Set ambient level"),
         SET_VOLUME("set_volume", "Set volume"),
-        SET_EQ_PRESET("set_eq_preset", "Set EQ preset");
+        SET_EQ_PRESET("set_eq_preset", "Set EQ preset"),
+        // The remaining headphone features, so a routine can reach everything the
+        // Audio tab can. Each reuses the frame builder the UI already uses.
+        SET_SPEAK_TO_CHAT("speak_to_chat", "Speak-to-chat"),
+        SET_PAUSE_TAKEN_OFF("pause_taken_off", "Pause when taken off"),
+        SET_DSEE("dsee", "DSEE Extreme"),
+        SET_BGM("bgm", "BGM (music player)"),
+        SET_UPMIX("upmix", "Upmix / Cinema"),
+        SET_VOICE_PASSTHROUGH("voice_passthrough", "Voice passthrough"),
+        SET_AUTO_AMBIENT("auto_ambient", "Auto ambient (adaptive)"),
+        SET_AUTO_POWER("auto_power", "Auto power off"),
+        SET_VOICE_GUIDANCE("voice_guidance", "Voice guidance volume");
 
         companion object {
             fun from(id: String) = values().firstOrNull { it.id == id } ?: NONE
+
+            /** Actions whose value is a simple on/off flag. */
+            val TOGGLES = setOf(
+                SET_SPEAK_TO_CHAT, SET_PAUSE_TAKEN_OFF, SET_DSEE, SET_BGM,
+                SET_UPMIX, SET_VOICE_PASSTHROUGH, SET_AUTO_AMBIENT,
+            )
+        }
+    }
+
+    /** Auto power-off target, for [ActionType.SET_AUTO_POWER]. */
+    enum class AutoPower(val id: String, val label: String) {
+        NEVER("never", "Never turn off"),
+        WHEN_TAKEN_OFF("taken_off", "When taken off");
+
+        companion object {
+            fun from(id: String) = values().firstOrNull { it.id == id } ?: WHEN_TAKEN_OFF
         }
     }
 
@@ -63,10 +91,12 @@ object Automation {
     data class Action(
         val type: ActionType = ActionType.NONE,
         val mode: Mode = Mode.NC,
-        /** Ambient level 0–20, or volume 0–20 depending on [type]. */
+        /** Ambient level 0–20, volume 0–20, or 0/1 for the on/off actions. */
         val value: Int = 0,
         /** EQ preset id (0x00–0x33 built-in, 0xA0/0xA1/0xA2 user slots). */
         val presetId: Int = 0,
+        /** Target for [ActionType.SET_AUTO_POWER]. */
+        val power: AutoPower = AutoPower.WHEN_TAKEN_OFF,
     )
 
     data class Rule(
@@ -112,6 +142,7 @@ object Automation {
                     put("mode", r.action.mode.id)
                     put("value", r.action.value)
                     put("presetId", r.action.presetId)
+                    put("power", r.action.power.id)
                 })
             })
         }
@@ -129,6 +160,7 @@ object Automation {
                 mode = Mode.from(a?.optString("mode") ?: "nc"),
                 value = a?.optInt("value", 0) ?: 0,
                 presetId = a?.optInt("presetId", 0) ?: 0,
+                power = AutoPower.from(a?.optString("power") ?: "taken_off"),
             ),
         )
     }
@@ -137,12 +169,19 @@ object Automation {
     fun resolve(rules: List<Rule>, trigger: Trigger): Rule? =
         rules.firstOrNull { it.enabled && it.trigger == trigger }
 
-    fun describe(rule: Rule): String = when (rule.action.type) {
-        ActionType.NONE -> "Do nothing"
-        ActionType.SET_MODE -> "Set ${rule.action.mode.label.lowercase()}"
-        ActionType.SET_AMBIENT_LEVEL -> "Set ambient level to ${rule.action.value}"
-        ActionType.SET_VOLUME -> "Set volume to ${rule.action.value}"
-        ActionType.SET_EQ_PRESET -> "Set EQ to ${presetName(rule.action.presetId)}"
+    fun describe(rule: Rule): String {
+        val t = rule.action.type
+        if (t in ActionType.TOGGLES) return "${t.label}: ${if (rule.action.value != 0) "on" else "off"}"
+        return when (t) {
+            ActionType.NONE -> "Do nothing"
+            ActionType.SET_MODE -> "Set ${rule.action.mode.label.lowercase()}"
+            ActionType.SET_AMBIENT_LEVEL -> "Set ambient level to ${rule.action.value}"
+            ActionType.SET_VOLUME -> "Set volume to ${rule.action.value}"
+            ActionType.SET_EQ_PRESET -> "Set EQ to ${presetName(rule.action.presetId)}"
+            ActionType.SET_AUTO_POWER -> "Auto power off: ${rule.action.power.label.lowercase()}"
+            ActionType.SET_VOICE_GUIDANCE -> "Voice guidance volume ${rule.action.value}"
+            else -> t.label
+        }
     }
 
     fun presetName(id: Int): String = when (id) {
