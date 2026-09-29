@@ -33,7 +33,7 @@
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
 
-                <Button android:id="@+id/btnToggle" android:layout_width="match_parent" android:layout_height="44dp" android:text="Start" android:textColor="@android:color/white" android:textSize="14sp" android:enabled="false" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="@color/stop_button_tint" android:layout_marginBottom="12dp" />
+                <Button android:id="@+id/btnToggle" android:layout_width="match_parent" android:layout_height="44dp" android:text="Start" android:textColor="@android:color/white" android:textSize="14sp" android:enabled="false" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="@color/stop_button_tint" android:layout_marginBottom="12dp" />
 
                 <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AMBIENT SOUND CONTROL" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="14dp" />
 
@@ -77,30 +77,30 @@
                 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
 
-                    <Button android:id="@+id/btnEQOff" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Off" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
+                    <Button android:id="@+id/btnEQOff" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Off" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
 
-                    <Button android:id="@+id/btnEQHeavy" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Heavy" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
+                    <Button android:id="@+id/btnEQHeavy" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Heavy" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
 
-                    <Button android:id="@+id/btnEQClear" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Clear" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
+                    <Button android:id="@+id/btnEQClear" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Clear" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
 
-                    <Button android:id="@+id/btnEQHard" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Hard" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
+                    <Button android:id="@+id/btnEQHard" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Hard" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:layout_marginBottom="8dp">
 
-                    <Button android:id="@+id/btnEQSoft" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Soft" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
+                    <Button android:id="@+id/btnEQSoft" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Soft" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
 
-                    <Button android:id="@+id/btnEQCustom" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Custom" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
+                    <Button android:id="@+id/btnEQCustom" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="Custom" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
                 </LinearLayout>
 
                 <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
 
-                    <Button android:id="@+id/btnEQUser1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="User 1" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
+                    <Button android:id="@+id/btnEQUser1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="User 1" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginEnd="4dp" />
 
-                    <Button android:id="@+id/btnEQUser2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="User 2" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
+                    <Button android:id="@+id/btnEQUser2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="48dp" android:text="User 2" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginStart="4dp" />
                 </LinearLayout>
 
                 <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center" android:paddingTop="16dp" android:textSize="11sp" android:textColor="#FF666666" android:text="Service must be running to apply EQ" />
@@ -112,7 +112,7 @@
 
                     <com.fencewatcher.sonyanc.EQGraphView android:id="@+id/eqGraph" android:layout_width="match_parent" android:layout_height="wrap_content" android:layout_marginTop="4dp" />
 
-                    <Button android:id="@+id/btnApplyCustomEQ" android:layout_width="match_parent" android:layout_height="44dp" android:text="Write to Custom" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FFCC8833" android:layout_marginTop="12dp" android:visibility="gone" />
+                    <Button android:id="@+id/btnApplyCustomEQ" android:layout_width="match_parent" android:layout_height="44dp" android:text="Write to Custom" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FFCC8833" android:layout_marginTop="12dp" android:visibility="gone" />
                 </LinearLayout>
             </LinearLayout></com.google.android.material.card.MaterialCardView><com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AMBIENT" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="8dp" />
 
@@ -160,7 +160,7 @@
                         <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="▾" android:textSize="16sp" android:textColor="#FF888888" android:contentDescription="Select device" />
                     </LinearLayout>
 
-                    <Button android:id="@+id/btnRefresh" android:layout_width="44dp" android:layout_height="44dp" android:text="↻" android:textSize="18sp" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:backgroundTint="#FF757575" android:padding="0dp" android:layout_marginStart="8dp" />
+                    <Button android:id="@+id/btnRefresh" android:layout_width="44dp" android:layout_height="44dp" android:text="↻" android:textSize="18sp" android:textColor="@android:color/white" app:cornerRadius="16dp" app:backgroundTint="#FF757575" android:padding="0dp" android:layout_marginStart="8dp" />
                 </LinearLayout>
 
                 <TextView android:id="@+id/textProfile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FF888888" android:text="Protocol: auto-detect" android:layout_marginBottom="20dp" />
@@ -171,12 +171,12 @@
 
                 <TextView android:id="@+id/textMultiPointStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FFAAAAAA" android:paddingTop="6dp" android:text="Tap a device to switch audio source" />
 
-                <Button android:id="@+id/btnRefreshDevices" android:layout_width="match_parent" android:layout_height="44dp" android:text="↻ Refresh devices" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF556B95" android:layout_marginTop="6dp" />
+                <Button android:id="@+id/btnRefreshDevices" android:layout_width="match_parent" android:layout_height="44dp" android:text="↻ Refresh devices" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF556B95" android:layout_marginTop="6dp" />
 
                 <TextView android:id="@+id/textFixPlaybackState" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FFAAAAAA" android:paddingTop="10dp" />
 
-                <Button android:id="@+id/btnFixPlayback" android:layout_width="match_parent" android:layout_height="44dp" android:text="Lock playback to this device" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:backgroundTint="#FF4E759C" android:layout_marginTop="4dp" />
-        <Button android:id="@+id/btnPairingMode" android:layout_width="match_parent" android:layout_height="44dp" android:text="Enter pairing mode" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:backgroundTint="#FF9C754E" android:layout_marginTop="4dp" />
+                <Button android:id="@+id/btnFixPlayback" android:layout_width="match_parent" android:layout_height="44dp" android:text="Lock playback to this device" android:textColor="@android:color/white" app:cornerRadius="16dp" app:backgroundTint="#FF4E759C" android:layout_marginTop="4dp" />
+        <Button android:id="@+id/btnPairingMode" android:layout_width="match_parent" android:layout_height="44dp" android:text="Enter pairing mode" android:textColor="@android:color/white" app:cornerRadius="16dp" app:backgroundTint="#FF9C754E" android:layout_marginTop="4dp" />
 
                 </LinearLayout></com.google.android.material.card.MaterialCardView></LinearLayout><LinearLayout android:id="@+id/routinesContent" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone"><com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="AUTOMATIONS" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingTop="20dp" android:paddingBottom="4dp" />
 
@@ -186,9 +186,9 @@
 
                 <LinearLayout android:id="@+id/automationList" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
 
-                <Button android:id="@+id/btnAddAutomation" android:layout_width="match_parent" android:layout_height="44dp" android:text="+ Add rule" android:textColor="@android:color/white" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF4E9C75" android:layout_marginTop="8dp" />
+                <Button android:id="@+id/btnAddAutomation" android:layout_width="match_parent" android:layout_height="44dp" android:text="+ Add rule" android:textColor="@android:color/white" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF4E9C75" android:layout_marginTop="8dp" />
 
-                <Button android:id="@+id/btnResetAutomation" android:layout_width="match_parent" android:layout_height="40dp" android:text="Reset to defaults" android:textColor="#FFAAAAAA" android:background="@drawable/bg_button" android:paddingHorizontal="8dp" android:backgroundTint="#FF757575" android:layout_marginTop="4dp" />
+                <Button android:id="@+id/btnResetAutomation" android:layout_width="match_parent" android:layout_height="40dp" android:text="Reset to defaults" android:textColor="#FFAAAAAA" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#FF757575" android:layout_marginTop="4dp" />
 
                 </LinearLayout></com.google.android.material.card.MaterialCardView></LinearLayout></LinearLayout>
     </ScrollView>

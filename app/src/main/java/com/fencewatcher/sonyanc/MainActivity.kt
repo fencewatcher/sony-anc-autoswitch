@@ -653,6 +653,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
 
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
+
     private fun renderMultiPoint() {
         val box = binding.multiPointList
         box.removeAllViews()
@@ -665,35 +668,38 @@ class MainActivity : AppCompatActivity() {
         for (i in multiMacs.indices) {
             val name = multiNames.getOrElse(i) { multiMacs[i] }
             val isActive = multiActive.getOrElse(i) { false }
+
+            // Was a single row crammed with name + MAC + a full Button, which
+            // rendered as one long strip with a grey block hanging off the end.
+            // Now: device identity on the first line, the quiet detail on the
+            // second, and the destructive action as a borderless text action
+            // rather than a filled button competing with the row itself.
             val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                setPadding(dp(14), dp(10), dp(10), dp(10))
+                background = androidx.core.content.ContextCompat.getDrawable(
+                    this@MainActivity,
+                    if (isActive) R.drawable.bg_device_row_active else R.drawable.bg_device_row
+                )
+                isClickable = !isActive
+            }
+
+            val top = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, 10, 0, 10)
-                isClickable = true
-                if (isActive) {
-                    setBackgroundColor(0x2233AA88)
-                    isEnabled = false
-                }
             }
-            val label = android.widget.TextView(this).apply {
+            top.addView(android.widget.TextView(this).apply {
                 text = name
-                textSize = 14f
-                setTextColor(if (isActive) Color.rgb(120, 230, 180) else Color.rgb(210, 210, 210))
-            }
-            val macLabel = android.widget.TextView(this).apply {
-                text = multiMacs[i]
-                textSize = 11f
-                setTextColor(Color.rgb(130, 130, 130))
-                gravity = android.view.Gravity.END
-            }
-            row.addView(label, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            row.addView(macLabel)
+                textSize = 15f
+                setTextColor(if (isActive) Color.rgb(140, 225, 190) else Color.rgb(230, 230, 230))
+            }, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
             // Unpair removes this device from the headset's paired list entirely.
-            val unpair = android.widget.Button(this).apply {
+            top.addView(android.widget.TextView(this).apply {
                 text = "Unpair"
-                textSize = 11f
-                setTextColor(Color.rgb(255, 150, 150))
-                setPadding(16, 0, 0, 0)
+                textSize = 12f
+                setTextColor(Color.rgb(226, 128, 128))
+                setPadding(dp(16), dp(6), dp(8), dp(6))
                 setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
                     sendToService(ACTION_PAIRED_DEVICE_ACTION) {
@@ -702,8 +708,26 @@ class MainActivity : AppCompatActivity() {
                     }
                     binding.textMultiPointStatus.text = "Unpairing $name…"
                 }
+            })
+            row.addView(top)
+
+            val bottom = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, dp(2), 0, 0)
             }
-            row.addView(unpair)
+            bottom.addView(android.widget.TextView(this).apply {
+                text = multiMacs[i]
+                textSize = 11f
+                setTextColor(Color.rgb(120, 120, 120))
+            }, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            bottom.addView(android.widget.TextView(this).apply {
+                text = if (isActive) "Active" else "Tap to switch"
+                textSize = 11f
+                setTextColor(if (isActive) Color.rgb(140, 225, 190) else Color.rgb(110, 110, 110))
+            })
+            row.addView(bottom)
+
             if (!isActive) {
                 row.setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
