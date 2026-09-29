@@ -81,19 +81,32 @@ object MediaAppTracker {
     /**
      * Is this playback event allowed by the user's allowlist?
      *
-     * Empty allowlist means "any app may trigger". When the allowlist is set but
-     * we cannot attribute the playback, we allow rather than silently disabling
-     * the headline feature — same policy as before, but now that fallback is
-     * rare instead of constant.
+     * Three tiers, because the strongest signal is not always available:
+     *
+     *  1. [playingPackages] — a real `MediaSession` in STATE_PLAYING. Authoritative.
+     *  2. [notifiedPackages] — apps holding a live media notification. Weaker, since
+     *     a paused app keeps its notification, but far better than allowing
+     *     everything when a non-allowlisted app is the one playing.
+     *  3. Nothing known — allow, so a missing permission cannot silently disable
+     *     the headline feature.
      */
     fun isAllowed(allowlist: Set<String>): Boolean {
         if (allowlist.isEmpty()) return true
+
         val playing = playingPackages
-        if (playing.isEmpty()) {
-            Log.w(TAG, "Allowlist set but no playing package known — allowing")
-            return true
+        if (playing.isNotEmpty()) {
+            Log.d(TAG, "tier=session playing=$playing allowed=${playing.any { it in allowlist }}")
+            return playing.any { it in allowlist }
         }
-        return playing.any { it in allowlist }
+
+        val notified = notifiedPackages()
+        if (notified.isNotEmpty()) {
+            Log.w(TAG, "tier=notification (no playing session) $notified")
+            return notified.any { it in allowlist }
+        }
+
+        Log.w(TAG, "tier=allow-all (nothing attributable)")
+        return true
     }
 
     fun reset() {

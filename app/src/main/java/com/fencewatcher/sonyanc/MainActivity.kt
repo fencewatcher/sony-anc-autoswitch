@@ -59,6 +59,9 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRING_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FIX_PLAYBACK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
@@ -93,6 +96,8 @@ class MainActivity : AppCompatActivity() {
     private var bgmMode = false
     private var upmixCinema = false
     private var autoPowerOffMode = 0
+    /** True = "Fix Playback": multipoint will not hand audio to another device. */
+    private var playbackFixed = false
     private var multiNames: Array<String> = emptyArray()
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
@@ -154,6 +159,18 @@ class MainActivity : AppCompatActivity() {
                 bgmMode = intent.getBooleanExtra(EXTRA_BGM, false)
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
+                playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
+                binding.btnFixPlayback.text =
+                    if (playbackFixed) "🔒 Playback locked" else "Lock playback to this device"
+                binding.textFixPlaybackState.text = when {
+                    !peripheralSupported ->
+                        "Peripheral/multipoint family not supported on this device"
+                    multiMacs.isEmpty() ->
+                        "Enable multipoint in the Sony app, connect a second device, then refresh."
+                    playbackFixed ->
+                        "Playback is pinned here — it will not switch to another device."
+                    else -> "Playback can move between paired devices."
+                }
                 val vg = intent.getIntExtra(EXTRA_VOICE_GUIDANCE_VOLUME, -1)
                 if (vg >= 0) {
                     updatingUi = true
@@ -175,9 +192,11 @@ class MainActivity : AppCompatActivity() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_NOT_EXPORTED else 0)
 
         // Tabs
-        binding.tabDashboard.setOnClickListener { switchTab(0) }
-        binding.tabSettings.setOnClickListener { switchTab(1) }
-        binding.tabEQ.setOnClickListener { switchTab(2) }
+        binding.tabHome.setOnClickListener { switchTab(0) }
+        binding.tabAudio.setOnClickListener { switchTab(1) }
+        binding.tabDevices.setOnClickListener { switchTab(2) }
+        binding.tabRoutines.setOnClickListener { switchTab(3) }
+        binding.tabSettings.setOnClickListener { switchTab(4) }
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
@@ -228,6 +247,19 @@ class MainActivity : AppCompatActivity() {
             if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
             binding.textMultiPointStatus.text = "Refreshing…"
             sendToService(ACTION_REFRESH_DEVICES) {}
+        }
+
+        // ---- Multipoint: lock playback + pairing mode ----
+        binding.btnFixPlayback.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+            val next = !playbackFixed
+            sendToService(ACTION_SET_FIX_PLAYBACK) { putExtra("fix", next) }
+            toast(if (next) "Locking playback to this device" else "Playback lock released")
+        }
+        binding.btnPairingMode.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+            sendToService(ACTION_ENTER_PAIRING_MODE) { putExtra("enter", true) }
+            toast("Pairing mode — hold to exit")
         }
 
         // ---- Headphone feature switches (Table 1 params) ----
@@ -306,20 +338,32 @@ class MainActivity : AppCompatActivity() {
 
     private fun switchTab(tab: Int) {
         showingTab = tab
-        binding.dashboardContent.visibility = if (tab == 0) View.VISIBLE else View.GONE
-        binding.settingsContent.visibility = if (tab == 1) View.VISIBLE else View.GONE
-        binding.eqContent.visibility = if (tab == 2) View.VISIBLE else View.GONE
-        val active = Color.rgb(224, 224, 224)
-        val muted = Color.rgb(136, 136, 136)
-        for ((i, t) in listOf(binding.tabDashboard, binding.tabSettings, binding.tabEQ).withIndex()) {
+        val panes = listOf(
+            binding.homeContent, binding.audioContent, binding.devicesContent,
+            binding.routinesContent, binding.settingsContent,
+        )
+        panes.forEachIndexed { i, v -> v.visibility = if (i == tab) View.VISIBLE else View.GONE }
+
+        val labels = listOf(
+            binding.tabHome, binding.tabAudio, binding.tabDevices,
+            binding.tabRoutines, binding.tabSettings,
+        )
+        val underlines = listOf(
+            binding.underlineHome, binding.underlineAudio, binding.underlineDevices,
+            binding.underlineRoutines, binding.underlineSettings,
+        )
+        val active = Color.rgb(240, 240, 240)
+        val muted = Color.rgb(138, 138, 138)
+        val accent = Color.rgb(120, 200, 170)
+        labels.forEachIndexed { i, t ->
             t.setTextColor(if (i == tab) active else muted)
             t.setTypeface(null, if (i == tab) android.graphics.Typeface.BOLD else android.graphics.Typeface.NORMAL)
+            t.textSize = if (i == tab) 14f else 13f
         }
-        // Tab underlines
-        binding.underlineDashboard.setBackgroundColor(if (tab == 0) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
-        binding.underlineSettings.setBackgroundColor(if (tab == 1) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
-        binding.underlineEQ.setBackgroundColor(if (tab == 2) Color.rgb(100, 200, 255) else Color.TRANSPARENT)
-        if (tab == 2) {
+        underlines.forEachIndexed { i, u ->
+            u.setBackgroundColor(if (i == tab) accent else Color.TRANSPARENT)
+        }
+        if (tab == 1) {
             binding.eqGraph.bandValues = eqBandValues
             if (BluetoothAncService.isRunning) sendToService(ACTION_GET_STATUS) {}
         }

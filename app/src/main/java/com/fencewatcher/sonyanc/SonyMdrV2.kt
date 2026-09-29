@@ -231,6 +231,33 @@ object SonyMdrV2 {
     const val CMD_PERI_NTFY_EXT_PARAM = 0x3D
 
     /** PeripheralInquiredType */
+    const val PERI_TYPE_PAIRING_DEVICE_MGMT_CLASSIC = 0x00
+    const val PERI_TYPE_SOURCE_SWITCH_CONTROL = 0x01
+    const val PERI_TYPE_PAIRING_DEVICE_MGMT_COD = 0x02
+    const val PERI_TYPE_MUSIC_HAND_OVER = 0x03
+
+    /**
+     * Lock / unlock automatic source switching — the Sony app calls this
+     * "Fix Playback". Disabling source-switch control pins playback to whichever
+     * device is already playing, so multipoint will not hand the audio over.
+     *
+     * Wire format is `PERI_SET_PARAM` + `SOURCE_SWITCH_CONTROL` + one value byte;
+     * the query reuses the same two-byte form and is answered by
+     * `PERI_RET_PARAM` + `SOURCE_SWITCH_CONTROL` + value.
+     *
+     * The reference's naming is inverted (`playbackFixed = !switchControlEnabled`),
+     * so the flag written here is "fix playback": true means locked.
+     */
+    fun buildSourceSwitchControlGet(): ByteArray = byteArrayOf(
+        CMD_PERI_GET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH_CONTROL.toByte(),
+    )
+
+    fun buildSourceSwitchControlSet(fixPlayback: Boolean): ByteArray = byteArrayOf(
+        CMD_PERI_SET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH_CONTROL.toByte(),
+        if (fixPlayback) 0x01 else 0x00,
+    )
+
+    /** PeripheralInquiredType */
     const val PERI_TYPE_DEVICE_MANAGEMENT = 0x00
     const val PERI_TYPE_SOURCE_SWITCH = 0x01
     const val PERI_TYPE_DEVICE_MANAGEMENT_COD = 0x02
@@ -388,18 +415,35 @@ object SonyMdrV2 {
     const val VOICE_TYPE_VOLUME = 0x20
 
     /**
-     * The XM6 only implements the 5-step variant. Driving the generic [VOICE_TYPE_VOLUME]
-     * on hardware that expects this one gets values above 5 silently rejected, and the
-     * slider springs back to the old value.
+     * The XM6 answers the generic [VOICE_TYPE_VOLUME] subtype but only honours
+     * values 0–5; anything higher is rejected and the value springs back.
+     *
+     * `VOLUME_SETTING_FIXED_TO_5_STEPS` (0x21) is documented for headsets with a
+     * fixed 5-step control, but the XM6 does *not* respond to it at all — trying
+     * it made the slider stop working entirely. So: use 0x20 and clamp the range
+     * rather than switching subtype.
      */
-    const val VOICE_TYPE_VOLUME_5_STEPS = 0x21
     const val VOICE_GUIDANCE_MAX = 5
 
     fun buildVoiceGuidanceVolumeGet(): ByteArray =
-        byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME_5_STEPS.toByte())
+        byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte())
     fun buildVoiceGuidanceVolumeSet(volume: Int): ByteArray = byteArrayOf(
-        CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME_5_STEPS.toByte(),
+        CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte(),
         volume.coerceIn(0, VOICE_GUIDANCE_MAX).toByte(), 0x00,
+    )
+
+    // ---- Link control (POWER family, T1) — pairing mode ----
+    //
+    // `PowerNotifyStatusLinkControl` is [command, LINK_CONTROL, EnableDisable],
+    // so the set form is the same three bytes. 0x07 = LINK_CONTROL.
+
+    const val CMD_POWER_SET_STATUS = 0x24
+    const val POWER_TYPE_LINK_CONTROL = 0x07
+
+    /** Enter or leave Bluetooth pairing mode. */
+    fun buildPairingModeSet(enter: Boolean): ByteArray = byteArrayOf(
+        CMD_POWER_SET_STATUS.toByte(), POWER_TYPE_LINK_CONTROL.toByte(),
+        if (enter) 0x01 else 0x00,
     )
 
     // ---- Assignable button / sensor + call capture (T1 SYSTEM) ----

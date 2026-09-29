@@ -195,6 +195,22 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+                ACTION_SET_FIX_PLAYBACK -> {
+                    val fix = intent.getBooleanExtra("fix", false)
+                    Log.d(tag, "Fix playback = $fix")
+                    scope.launch {
+                        sendFrame(SonyMdrV2.buildSourceSwitchControlSet(fix), SonyMdrV2.Table.T2)
+                        delay(150L)
+                        sendFrame(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
+                    }
+                }
+
+                ACTION_ENTER_PAIRING_MODE -> {
+                    val enter = intent.getBooleanExtra("enter", true)
+                    Log.d(tag, "Pairing mode: enter=$enter")
+                    scope.launch { sendFrame(SonyMdrV2.buildPairingModeSet(enter)) }
+                }
+
                 ACTION_RELOAD_AUTOMATION -> reloadAutomation()
             }
         } catch (e: Exception) {
@@ -542,6 +558,17 @@ class BluetoothAncService : Service() {
                 }
             }
 
+            SonyMdrV2.CMD_PERI_RET_PARAM, SonyMdrV2.CMD_PERI_NTFY_PARAM -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PERI_TYPE_SOURCE_SWITCH_CONTROL) {
+                    val v = p[2].toInt() and 0xFF
+                    if (v <= 1) {
+                        playbackFixed = v == 0x01
+                        Log.d(tag, "Source-switch control (fix playback) = $playbackFixed")
+                        broadcastStats()
+                    }
+                }
+            }
+
             SonyMdrV2.CMD_PERI_NTFY_EXT_PARAM -> {
                 val res = SonyMdrV2.decodeSourceSwitchResult(p)
                 if (res != null) {
@@ -641,6 +668,8 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
         delay(120)
         sendFrame(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
         delay(120)
         sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
     }
@@ -1051,6 +1080,10 @@ class BluetoothAncService : Service() {
         private set
     var upmixCinema: Boolean = false
         private set
+
+    /** True = "Fix Playback": multipoint will not hand the audio over. */
+    var playbackFixed: Boolean = false
+        private set
     var voiceGuidanceVolume: Int = -1
         private set
 
@@ -1091,6 +1124,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DSEE, dseeExtreme)
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
+            putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
             `package` = packageName
         }
@@ -1131,6 +1165,9 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
         const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
+        const val ACTION_ENTER_PAIRING_MODE = "$PACKAGE.action.ENTER_PAIRING_MODE"
+        const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
+        const val EXTRA_FIX_PLAYBACK = "fix_playback"
 
         const val EXTRA_VOICE_GUIDANCE_VOLUME = "voice_guidance_volume"
 
