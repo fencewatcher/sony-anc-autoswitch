@@ -1101,6 +1101,18 @@ class BluetoothAncService : Service() {
 
     private val frameLog = ArrayDeque<String>()
     private var lastFrameLogPush = 0L
+    private val frameLogHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    /**
+     * Trailing push. A plain throttle drops the update for any frame arriving
+     * inside the window, which means the last frame of an exchange is recorded
+     * but never sent — the screen then looks frozen until some later frame
+     * happens to trip the throttle. Scheduling the remainder fixes that.
+     */
+    private val trailingPush = Runnable {
+        lastFrameLogPush = System.currentTimeMillis()
+        pushFrameLog()
+    }
 
     private fun recordFrame(direction: String, table: String, payload: ByteArray, seq: Int? = null) {
         val cal = java.util.Calendar.getInstance()
@@ -1112,11 +1124,15 @@ class BluetoothAncService : Service() {
         val seqTxt = if (seq != null) " seq=$seq" else ""
         frameLog.addLast("$stamp  $direction [$table] ${SonyMdrV2.hex(payload)}$seqTxt")
         while (frameLog.size > 300) frameLog.removeFirst()
-        // Throttle: a burst of frames would otherwise rebroadcast per byte.
+        // Throttle a burst, but always flush the tail.
         val now = System.currentTimeMillis()
-        if (now - lastFrameLogPush > 250L) {
+        val elapsed = now - lastFrameLogPush
+        if (elapsed > FRAME_LOG_PUSH_INTERVAL_MS) {
             lastFrameLogPush = now
             pushFrameLog()
+        } else {
+            frameLogHandler.removeCallbacks(trailingPush)
+            frameLogHandler.postDelayed(trailingPush, FRAME_LOG_PUSH_INTERVAL_MS - elapsed)
         }
     }
 
@@ -1543,6 +1559,9 @@ class BluetoothAncService : Service() {
 
         /** Re-send the current log without clearing it. */
         const val ACTION_GET_FRAME_LOG = "$PACKAGE.action.GET_FRAME_LOG"
+
+        /** Minimum gap between frame-log broadcasts to the debug menu. */
+        const val FRAME_LOG_PUSH_INTERVAL_MS = 250L
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
