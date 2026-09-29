@@ -57,6 +57,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ACTIVE_CODEC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_HEADPHONES_WORN
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LE_AUDIO
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_QUICK_ACCESS_FUNCTIONS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPSCALING_EFFECT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPSCALING_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
@@ -151,6 +152,9 @@ class MainActivity : AppCompatActivity() {
 
     /** DSEE/upscaling status, or null until reported. */
     private var upscalingStatus: Int? = null
+
+    /** Which upscaling variant the headset has selected, or null until reported. */
+    private var upscalingEffect: Int? = null
 
     /** The four wire values the app is known to send, in menu order. */
     private val qaValues = intArrayOf(
@@ -277,6 +281,11 @@ class MainActivity : AppCompatActivity() {
 
             if (intent?.hasExtra(EXTRA_UPSCALING_STATUS) == true) {
                 upscalingStatus = intent.getIntExtra(EXTRA_UPSCALING_STATUS, 0xFF)
+                markRenderDirty()
+            }
+
+            if (intent?.hasExtra(EXTRA_UPSCALING_EFFECT) == true) {
+                upscalingEffect = intent.getIntExtra(EXTRA_UPSCALING_EFFECT, 0xFF)
                 markRenderDirty()
             }
 
@@ -1095,9 +1104,16 @@ class MainActivity : AppCompatActivity() {
             bindQaSpinner(binding.spinnerQaRight, fns.getOrNull(1) ?: SonyMdrV2.QUICK_ACCESS_NONE)
         }
 
+        // "invalid" was showing verbatim and meant nothing to read — it is a status
+        // code, not a fault. The variant name is the part worth showing: it says
+        // which upscaler the headset has actually selected.
         upscalingStatus?.let { st ->
             binding.textUpscaling.visibility = android.view.View.VISIBLE
-            binding.textUpscaling.text = "DSEE effect: " + SonyMdrV2.upscalingStatusName(st)
+            binding.textUpscaling.text = if (st == SonyMdrV2.UPSCALING_STATUS_OFF) {
+                "DSEE is off"
+            } else {
+                "DSEE: " + SonyMdrV2.upscalingEffectName(upscalingEffect ?: 0xFF)
+            }
         }
 
         // Wear glyph, bottom-right of the hero card. Green on head, yellow off.

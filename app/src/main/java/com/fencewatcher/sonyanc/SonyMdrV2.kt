@@ -300,6 +300,18 @@ object SonyMdrV2 {
         else -> "0x%02x".format(v)
     }
 
+    /**
+     * Which upscaling variant the headset has selected. Traced from the app's
+     * UpscalingEffectType enum.
+     */
+    fun upscalingEffectName(v: Int): String = when (v) {
+        0x00 -> "DSEE HX"
+        0x01 -> "DSEE"
+        0x02 -> "DSEE HX AI"
+        0x03 -> "DSEE Ultimate"
+        else -> "0x%02x".format(v)
+    }
+
     // ---- LE Audio transport (T1) ----
     //
     // Distinct from connection mode (0x02) despite sharing the Audio group.

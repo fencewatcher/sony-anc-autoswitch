@@ -928,13 +928,14 @@ class BluetoothAncService : Service() {
                         broadcastStats()
                     }
                     subtype == SonyMdrV2.COMMON_TYPE_UPSCALING_EFFECT && p.size >= 4 -> {
+                        val effect = p[2].toInt() and 0xFF
                         val st = p[3].toInt() and 0xFF
-                        if (st != upscalingStatus) {
+                        if (st != upscalingStatus || effect != upscalingEffect) {
                             upscalingStatus = st
+                            upscalingEffect = effect
                             Log.d(
-                                tag, "Upscaling: effect 0x%02x %s".format(
-                                    p[2].toInt() and 0xFF, SonyMdrV2.upscalingStatusName(st),
-                                ),
+                                tag, "Upscaling: ${SonyMdrV2.upscalingEffectName(effect)} " +
+                                    SonyMdrV2.upscalingStatusName(st),
                             )
                             broadcastStats()
                         }
@@ -1680,6 +1681,10 @@ class BluetoothAncService : Service() {
     var upscalingStatus: Int? = null
         private set
 
+    /** Which upscaling variant the headset has selected, or null until reported. */
+    var upscalingEffect: Int? = null
+        private set
+
     private fun applyWearCode(code: Int) {
         val changed = code != wearStatusCode
         wearStatusCode = code
@@ -1778,6 +1783,7 @@ class BluetoothAncService : Service() {
         quickAccessEnabled?.let { putExtra(EXTRA_QUICK_ACCESS_ENABLED, it) }
         quickAccessFunctions?.let { putExtra(EXTRA_QUICK_ACCESS_FUNCTIONS, it) }
         upscalingStatus?.let { putExtra(EXTRA_UPSCALING_STATUS, it) }
+        upscalingEffect?.let { putExtra(EXTRA_UPSCALING_EFFECT, it) }
         putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
@@ -1865,6 +1871,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_QUICK_ACCESS_ENABLED = "quick_access_enabled"
         const val EXTRA_QUICK_ACCESS_FUNCTIONS = "quick_access_functions"
         const val EXTRA_UPSCALING_STATUS = "upscaling_status"
+        const val EXTRA_UPSCALING_EFFECT = "upscaling_effect"
 
         const val FRAME_LOG_BROADCAST = "$PACKAGE.action.FRAME_LOG"
         const val EXTRA_FRAME_LOG = "frame_log"

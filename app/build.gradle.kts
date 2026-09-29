@@ -23,8 +23,8 @@ android {
         // versionCode tracks versionName from v1.17 onward. Previously versionName
         // was pinned at "1.3" through v1.16, so the version on the device could not
         // tell you which build was installed.
-        versionCode = 63
-        versionName = "1.63"
+        versionCode = 64
+        versionName = "1.64"
 
         buildConfigField("String", "BUILD_HASH", "\"$gitHash\"")
 
