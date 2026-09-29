@@ -751,7 +751,7 @@ class BluetoothAncService : Service() {
                         bgmMode = flag
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6_READ,
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
                         // XM6 carries the PriorMode byte at index 2; XM5 inserts a
                         // setting-type byte first, so it lands at index 3.
@@ -764,6 +764,20 @@ class BluetoothAncService : Service() {
                     }
                 }
                 broadcastStats()
+            }
+
+            // AUDIO_RET_STATUS carries LDAC activity: [cmd, type, status, ldacEnable].
+            // This is the codec readout the protocol does allow — the codec cannot
+            // be selected, but whether LDAC is actually running can be observed.
+            SonyMdrV2.CMD_AUDIO_RET_STATUS -> {
+                if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6) {
+                    val l = SonyMdrV2.decodeInvertedEnable(p[3].toInt() and 0xFF)
+                    if (l != null) {
+                        ldacActive = l
+                        Log.d(tag, "LDAC active: $l")
+                    }
+                    broadcastStats()
+                }
             }
 
             // SENSE (wearing / adaptive control). Not driven yet — the XM6
@@ -792,6 +806,7 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        sendFrame(SonyMdrV2.buildLdacStatusGet())
         // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
         // parameter-notification variant too. Whichever answers, if either, tells
         // us where wearing detection actually lives.
@@ -1291,6 +1306,10 @@ class BluetoothAncService : Service() {
     var connectionSoundQuality: Boolean? = null
         private set
 
+    /** null until the headphones report whether LDAC is in use. */
+    var ldacActive: Boolean? = null
+        private set
+
     /** Last raw SENSE frame seen, for the Home debug line. */
     var senseDebug: String = "no SENSE frame yet"
         private set
@@ -1361,6 +1380,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
         connectionSoundQuality?.let { putExtra(EXTRA_CONNECTION_MODE, it) }
+        ldacActive?.let { putExtra(EXTRA_LDAC_ACTIVE, it) }
         putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
@@ -1438,6 +1458,9 @@ class BluetoothAncService : Service() {
 
         /** Last raw SENSE frame, hex, for the Home debug line. */
         const val EXTRA_SENSE_DEBUG = "sense_debug"
+
+        /** True when the headphones report LDAC is actually in use. */
+        const val EXTRA_LDAC_ACTIVE = "ldac_active"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"

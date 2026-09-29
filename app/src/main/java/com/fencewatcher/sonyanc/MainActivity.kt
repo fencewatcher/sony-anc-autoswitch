@@ -52,6 +52,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_CONNECTION_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SENSE_DEBUG
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LDAC_ACTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -112,6 +113,9 @@ class MainActivity : AppCompatActivity() {
 
     /** Last raw SENSE frame from the service, shown on Home for wearing-detection work. */
     private var senseDebug: String? = null
+
+    /** null until the headphones report LDAC activity. */
+    private var ldacActive: Boolean? = null
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -182,6 +186,9 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (intent.hasExtra(EXTRA_SENSE_DEBUG)) {
                     senseDebug = intent.getStringExtra(EXTRA_SENSE_DEBUG)
+                }
+                if (intent.hasExtra(EXTRA_LDAC_ACTIVE)) {
+                    ldacActive = intent.getBooleanExtra(EXTRA_LDAC_ACTIVE, false)
                 }
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
@@ -868,10 +875,15 @@ class MainActivity : AppCompatActivity() {
         }
         connectionSoundQuality?.let { sq ->
             binding.spinnerConnectionMode.setSelection(if (sq) 0 else 1)
-            binding.textConnectionStatus.text = if (sq) {
+            val base = if (sq) {
                 "Sound quality — the headphones may use LDAC or aptX when the phone offers them."
             } else {
                 "Connection priority — favours stability and range over audio quality."
+            }
+            binding.textConnectionStatus.text = when (ldacActive) {
+                true -> "$base\nLDAC: active"
+                false -> "$base\nLDAC: not in use"
+                null -> "$base\nLDAC: unknown"
             }
         }
         // Wearing-detection debug: hidden until the headphones actually answer, so

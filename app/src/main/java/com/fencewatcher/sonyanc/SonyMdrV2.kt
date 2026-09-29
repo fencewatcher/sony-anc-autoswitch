@@ -186,18 +186,37 @@ object SonyMdrV2 {
     const val AUDIO_TYPE_BGM_MODE = 0x03
     const val AUDIO_TYPE_UPMIX_CINEMA = 0x04
     const val AUDIO_TYPE_BGM_AND_ERRORCODE = 0x09
-    // Connection mode. XM6 and XM5 disagree on the type byte, and — the bit that
-    // actually broke it — XM6 uses a *different* type for the set than for the
-    // readback: AudioSetParamConnection sends CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO
-    // (0x05) while AudioRetParamConnection answers as CONNECTION_MODE (0x00).
-    // Asking for 0x05 and decoding 0x05 meant the read never matched and the
-    // spinner never left its old value.
-    const val AUDIO_TYPE_CONNECTION_MODE_XM6_SET = 0x05 // set only
-    const val AUDIO_TYPE_CONNECTION_MODE_XM6_READ = 0x00 // read/ret
-    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // both directions
+    // Connection mode. XM6 and XM5 disagree on the type byte.
+    //
+    // The XM6 type is CONNECTION_MODE_WITH_LDAC_STATUS (0x02), and it is the
+    // same byte for set and readback. The earlier attempt used
+    // CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO (0x05), which is the LE-Audio
+    // transport switch rather than the quality priority — the headphones
+    // accepted the frame and then always answered 0x00, so the value never
+    // changed and the toggle looked pinned.
+    const val AUDIO_TYPE_CONNECTION_MODE_XM6 = 0x02 // set and read
+    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // set and read
     const val CONNECTION_SETTING_SOUND_CONNECTION = 0x00 // XM5 only
     const val PRIOR_SOUND_QUALITY = 0x00
     const val PRIOR_CONNECTION_QUALITY = 0x01
+
+    const val CMD_AUDIO_GET_STATUS = 0xE2
+    const val CMD_AUDIO_RET_STATUS = 0xE3
+
+    /** EnableDisable is inverted: 0x00 = enabled, 0x01 = disabled. */
+    fun decodeInvertedEnable(b: Int): Boolean? = when (b) {
+        0x00 -> true
+        0x01 -> false
+        else -> null
+    }
+
+    /**
+     * LDAC activity, as reported by [buildLdacStatusGet]. This is the codec
+     * readout the protocol does allow: the active codec cannot be selected, but
+     * whether LDAC is actually in use can be observed.
+     */
+    fun buildLdacStatusGet(): ByteArray =
+        byteArrayOf(CMD_AUDIO_GET_STATUS.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM6.toByte())
 
     // ---- SENSE (wearing / adaptive control) — observed, not yet driven ----
 
@@ -247,7 +266,7 @@ object SonyMdrV2 {
      */
     fun buildConnectionModeGet(xm5: Boolean): ByteArray = byteArrayOf(
         CMD_AUDIO_GET_PARAM.toByte(),
-        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6_READ).toByte(),
+        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte(),
     )
 
     fun buildConnectionModeSet(xm5: Boolean, soundQualityPrior: Boolean): ByteArray {
@@ -259,10 +278,9 @@ object SonyMdrV2 {
                 CONNECTION_SETTING_SOUND_CONNECTION.toByte(), prior,
             )
         }
-        // XM6: [cmd, type, prior]. An earlier revision padded a fourth byte here and
-        // the headphones rejected the frame, which is why the toggle looked stuck.
+        // XM6: [cmd, type, prior]
         return byteArrayOf(
-            CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM6_SET.toByte(), prior,
+            CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM6.toByte(), prior,
         )
     }
 
