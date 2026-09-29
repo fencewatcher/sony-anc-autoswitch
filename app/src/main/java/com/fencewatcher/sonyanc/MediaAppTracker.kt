@@ -241,7 +241,7 @@ class MediaNotificationListener : NotificationListenerService() {
         // Start listening for real session transitions.
         try {
             manager()?.registerOnActiveSessionsChangedListener(
-                sessionsChangedListener, Handler(Looper.getMainLooper()),
+                self, sessionsChangedListener, Handler(Looper.getMainLooper()),
             )
             Log.d(logTag, "Registered OnActiveSessionsChangedListener")
         } catch (e: Exception) {
@@ -253,7 +253,7 @@ class MediaNotificationListener : NotificationListenerService() {
         super.onListenerDisconnected()
         MediaAppTracker.trackingEnabled = false
         try {
-            manager()?.unregisterOnActiveSessionsChangedListener(sessionsChangedListener)
+            manager()?.unregisterOnActiveSessionsChangedListener(self, sessionsChangedListener)
         } catch (e: Exception) {
             Log.w(logTag, "session listener unregister failed: ${e.message}")
         }

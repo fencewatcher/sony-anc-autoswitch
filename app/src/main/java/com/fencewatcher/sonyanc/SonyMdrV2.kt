@@ -248,9 +248,9 @@ object SonyMdrV2 {
      * sets it explicitly.
      */
     fun buildPairingModeSet(enter: Boolean): ByteArray = byteArrayOf(
-        CMD_PERI_SET_STATUS, PERI_TYPE_DEVICE_MANAGEMENT_COD,
-        if (enter) PERI_BT_MODE_INQUIRY_SCAN else PERI_BT_MODE_NORMAL,
-        0x01, // enableDisableStatus = ENABLE
+        CMD_PERI_SET_STATUS.toByte(), PERI_TYPE_DEVICE_MANAGEMENT_COD.toByte(),
+        (if (enter) PERI_BT_MODE_INQUIRY_SCAN else PERI_BT_MODE_NORMAL).toByte(),
+        0x01.toByte(), // enableDisableStatus = ENABLE
     )
 
     /** Decode the pairing-mode state from a PERI notify/ret status reply. */
