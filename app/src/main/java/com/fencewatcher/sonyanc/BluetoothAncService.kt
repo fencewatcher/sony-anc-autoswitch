@@ -34,7 +34,55 @@ class BluetoothAncService : Service() {
     private var refreshJob: Job? = null
     private var btSocket: BluetoothSocket? = null
     private var mediaMonitor: MediaPlaybackMonitor? = null
-    private var currentSeq = 0
+    /**
+     * T1 and T2 are separate channels and the device keeps a sequence per table,
+     * so one shared counter let a T1 frame take the number a T2 frame had just
+     * used. Two counters, matching the two tables.
+     */
+    private var seqT1 = 0
+    private var seqT2 = 0
+
+    private class PendingRequest(
+        val replyCommand: Int,
+        val reply: CompletableDeferred<ByteArray>,
+    )
+
+    private val pendingLock = Any()
+    private var pending: PendingRequest? = null
+
+    /**
+     * Send one query and wait for its reply.
+     *
+     * The link is stop and wait, which is why a long burst sent without waiting
+     * lost everything past the first few replies. Every MDR command pair follows
+     * reply = request + 1, so a reply can be matched to its request on the
+     * command byte alone — no guessing at payload shapes, and an unsolicited
+     * notification can never be mistaken for the answer.
+     *
+     * Returns the reply payload, or null if it never arrived. Times out rather
+     * than blocking forever, and retries once, because the device retransmits
+     * its own frames when our acknowledgement does not land.
+     */
+    private suspend fun request(
+        payload: ByteArray,
+        table: SonyMdrV2.Table = SonyMdrV2.Table.T1,
+        attempts: Int = 2,
+        timeoutMs: Long = 800L,
+    ): ByteArray? {
+        val replyCommand = ((payload[0].toInt() and 0xFF) + 1) and 0xFF
+        for (attempt in 1..attempts) {
+            val deferred = CompletableDeferred<ByteArray>()
+            synchronized(pendingLock) { pending = PendingRequest(replyCommand, deferred) }
+            sendFrame(payload, table)
+            try {
+                return withTimeout(timeoutMs) { deferred.await() }
+            } catch (_: TimeoutCancellationException) {
+                Log.d(tag, "No reply to ${SonyMdrV2.hex(payload)} (try $attempt of $attempts)")
+                synchronized(pendingLock) { pending = null }
+            }
+        }
+        return null
+    }
     private var isMediaPlaying = false
 
     /** User-configurable behaviour rules; defaults reproduce the original hard-coded policy. */
@@ -477,25 +525,68 @@ class BluetoothAncService : Service() {
                     status = Status.CONNECTED
                     broadcastStatus(status, "Connected")
                     updateNotification("Connected")
-                    currentSeq = 0       // Reset seq on every fresh connection
+                    seqT1 = 0            // Reset seq on every fresh connection
+                    seqT2 = 0
                     retries = 0          // Reset retry counter on success
+
+                    // The read loop has to be running before the handshake: request()
+                    // waits for a reply, and with nothing draining the socket every
+                    // query would simply time out. Runs for the life of the link on
+                    // Dispatchers.IO, alongside the connect coroutine below.
+                    val reader = launch {
+                        // Blocking read loop — any data or -1 / IOException = disconnected
+                        val inputStream = socket.inputStream
+                        val buffer = ByteArray(1024)
+                        val frameDecoder = MdrFrameDecoder()
+                        try {
+                            while (isActive) {
+                                val n = inputStream.read(buffer)
+                                if (n == -1) break // EOF = orderly disconnect
+                                if (n > 0) {
+                                    val frames = frameDecoder.feed(buffer.copyOfRange(0, n))
+                                    for (frame in frames) {
+                                        // Stop-and-wait: every non-ACK frame must be ACKed
+                                        // with flipped sequence bit, or the XM6 closes the channel.
+                                        if (frame.dataType != 0x01) {
+                                            val ackSeq = (frame.sequence xor 1) and 0xFF
+                                            sendAck(ackSeq)
+                                            Log.d(tag, "← [${if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(frame.payload)}")
+                                            recordFrame("RX", if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1", frame.payload)
+                                            // Resolve an outstanding request, matched on the command
+                                            // byte only. An unsolicited notification carries a notify
+                                            // command, never request+1, so it cannot be mistaken for
+                                            // the answer we are waiting on.
+                                            synchronized(pendingLock) {
+                                                val p = pending
+                                                if (p != null && frame.payload.isNotEmpty() &&
+                                                    p.replyCommand == (frame.payload[0].toInt() and 0xFF)
+                                                ) {
+                                                    pending = null
+                                                    p.reply.complete(frame.payload)
+                                                }
+                                            }
+                                            parseIncoming(frame)
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: IOException) {
+                            Log.w(tag, "BT error: IOException: ${e.message}")
+                        }
+                    }
+
 
                     // XM6 protocol handshake — required before the headphones accept 0x19 commands
                     Log.d(tag, "Handshake: protocol info")
-                    sendFrame(byteArrayOf(0x00, 0x00))
-                    delay(100L)
+                    request(byteArrayOf(0x00, 0x00))
                     Log.d(tag, "Handshake: support functions")
-                    sendFrame(byteArrayOf(0x06, 0x00))
-                    delay(100L)
+                    request(byteArrayOf(0x06, 0x00))
                     Log.d(tag, "Handshake: battery")
-                    sendFrame(byteArrayOf(0x22, 0x00))
-                    delay(100L)
+                    request(byteArrayOf(0x22, 0x00))
                     Log.d(tag, "Handshake: XM6 ANC inquiry (${profile.ancInquiry.joinToString(" ") { "%02x".format(it) }})")
-                    sendFrame(profile.ancInquiry)
-                    delay(100L)
+                    request(profile.ancInquiry)
                     Log.d(tag, "Handshake: EQ")
-                    sendFrame(byteArrayOf(0x56, 0x00))
-                    delay(200L)
+                    request(byteArrayOf(0x56, 0x00))
 
                     // Probe every feature we can display, on both command tables.
                     // The peripheral/multipoint family only answers on table 2.
@@ -532,32 +623,8 @@ class BluetoothAncService : Service() {
                         }
                     }
 
-                    // Blocking read loop — any data or -1 / IOException = disconnected
-                    val inputStream = socket.inputStream
-                    val buffer = ByteArray(1024)
-                    val frameDecoder = MdrFrameDecoder()
-                    try {
-                        while (isActive) {
-                            val n = inputStream.read(buffer)
-                            if (n == -1) break // EOF = orderly disconnect
-                            if (n > 0) {
-                                val frames = frameDecoder.feed(buffer.copyOfRange(0, n))
-                                for (frame in frames) {
-                                    // Stop-and-wait: every non-ACK frame must be ACKed
-                                    // with flipped sequence bit, or the XM6 closes the channel.
-                                    if (frame.dataType != 0x01) {
-                                        val ackSeq = (frame.sequence xor 1) and 0xFF
-                                        sendAck(ackSeq)
-                                        Log.d(tag, "← [${if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(frame.payload)}")
-                                        recordFrame("RX", if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1", frame.payload)
-                                        parseIncoming(frame)
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e: IOException) {
-                        Log.w(tag, "BT error: IOException: ${e.message}")
-                    }
+                    // Held open below so the socket keeps being drained.
+                    reader.join()
 
                     // Socket closed — reconnect automatically
                     btSocket = null
@@ -987,49 +1054,38 @@ class BluetoothAncService : Service() {
     }
 
     private suspend fun queryAllState() {
-        // The headset silently drops the tail of a long burst. A 30 frame sweep sent
-        // back to back answers the first handful and then nothing: codec, wear, LE
-        // audio, Quick Access and DSEE all get no reply at all. The same commands in a
-        // seven frame batch answer inside 400ms. So the sweep is paced — every frame
-        // gets a turn before the next is written.
-        suspend fun q(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
-            delay(50L)
-            sendFrame(payload, table)
-        }
 
+        // Genuinely stop and wait. Each query is answered before the next is
+        // written, which is what the link requires and what a fixed delay could
+        // only ever approximate.
         // Table 1 — main features
-        q(byteArrayOf(SonyMdrV2.CMD_NCASM_GET_PARAM.toByte(), SonyMdrV2.NCASM_SUBTYPE_STANDARD.toByte()))
-        q(SonyMdrV2.buildAutoPowerOffGet())
-        q(SonyMdrV2.buildSpeakToChatGet())
-        q(SonyMdrV2.buildPauseWhenTakenOffGet())
-        q(SonyMdrV2.buildSpeakToChatConfigGet())
-        q(SonyMdrV2.buildUpscalingGet())
-        q(SonyMdrV2.buildBgmGet())
-        q(SonyMdrV2.buildUpmixGet())
-        q(SonyMdrV2.buildConnectionModeGet(isXm5()))
-        q(SonyMdrV2.buildLdacStatusGet())
+        request(byteArrayOf(SonyMdrV2.CMD_NCASM_GET_PARAM.toByte(), SonyMdrV2.NCASM_SUBTYPE_STANDARD.toByte()))
+        request(SonyMdrV2.buildAutoPowerOffGet())
+        request(SonyMdrV2.buildSpeakToChatGet())
+        request(SonyMdrV2.buildPauseWhenTakenOffGet())
+        request(SonyMdrV2.buildSpeakToChatConfigGet())
+        request(SonyMdrV2.buildUpscalingGet())
+        request(SonyMdrV2.buildBgmGet())
+        request(SonyMdrV2.buildUpmixGet())
+        request(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        request(SonyMdrV2.buildLdacStatusGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
-        q(SonyMdrV2.buildAudioCodecGet())
-        q(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
-        q(SonyMdrV2.buildLeAudioStatusGet())
-        q(SonyMdrV2.buildQuickAccessEnableGet())
-        q(SonyMdrV2.buildQuickAccessFunctionGet())
-        q(SonyMdrV2.buildUpscalingStatusGet())
-        q(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+        request(SonyMdrV2.buildAudioCodecGet())
+        request(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildLeAudioStatusGet())
+        request(SonyMdrV2.buildQuickAccessEnableGet())
+        request(SonyMdrV2.buildQuickAccessFunctionGet())
+        request(SonyMdrV2.buildUpscalingStatusGet())
+        request(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
-        q(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
-        delay(120)
-        q(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
-        delay(120)
-        q(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
-        delay(120)
-        q(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
-        delay(120)
-        q(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
-        delay(120)
-        q(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildSourceSwitchControlGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildPairingModeGet(), SonyMdrV2.Table.T2)
+        request(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
     }
 
     /** Re-read the multipoint list (used after a successful source switch). */
@@ -1237,12 +1293,13 @@ class BluetoothAncService : Service() {
     private fun sendFrame(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
         val socket = btSocket ?: return
         try {
-            val frame = SonyMdrV2.buildFrame(currentSeq, payload, table)
+            val seq = if (table == SonyMdrV2.Table.T2) seqT2 else seqT1
+            val frame = SonyMdrV2.buildFrame(seq, payload, table)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
-            Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$currentSeq")
-            recordFrame("TX", if (table == SonyMdrV2.Table.T2) "T2" else "T1", payload, currentSeq)
-            currentSeq = currentSeq xor 1
+            Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$seq")
+            recordFrame("TX", if (table == SonyMdrV2.Table.T2) "T2" else "T1", payload, seq)
+            if (table == SonyMdrV2.Table.T2) seqT2 = seq xor 1 else seqT1 = seq xor 1
 
             // Track the mode we last commanded (for notification stats)
             if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == SonyMdrV2.CMD_NCASM_SET_PARAM) {
