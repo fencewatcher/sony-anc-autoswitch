@@ -866,13 +866,32 @@ class MainActivity : AppCompatActivity() {
         }
         if (pairedDevices.isEmpty()) {
             binding.textModel.text = "No headphones"; updateCardStatus("🔍 Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
+            updateModelArt("")
         } else {
-            binding.textModel.text = pairedDevices.first().name; updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
+            val first = pairedDevices.first().name
+            binding.textModel.text = first; updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
+            updateModelArt(first)
         }
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
         binding.spinnerDevice.adapter = listAdapter
         loadDeviceSettings()
+    }
+
+    // ---- Model artwork ----
+
+    /**
+     * Swap the hero image for the connected model, falling back to the vector icon
+     * for anything without artwork yet (XM5, and unrecognised names). Product shots
+     * live in drawable-nodpi so they are not rescaled per screen density.
+     */
+    private fun updateModelArt(name: String) {
+        binding.imageModel.setImageResource(
+            when {
+                name.contains("XM6", ignoreCase = true) -> R.drawable.model_xm6
+                else -> R.drawable.ic_headphones_big
+            }
+        )
     }
 
     // ---- Toggle ----
