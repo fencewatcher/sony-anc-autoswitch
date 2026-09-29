@@ -616,9 +616,10 @@ class BluetoothAncService : Service() {
 
             // ---- Voice guidance (T2 only) ----
             SonyMdrV2.CMD_VOICE_GUIDANCE_RET_PARAM -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.VOICE_TYPE_VOLUME) {
-                    voiceGuidanceVolume = p[2].toInt() and 0xFF
-                    Log.d(tag, "Voice guidance volume: $voiceGuidanceVolume")
+                val v = SonyMdrV2.decodeVoiceGuidanceVolume(p)
+                if (v != null) {
+                    voiceGuidanceVolume = v
+                    Log.d(tag, "Voice guidance volume: $v")
                     broadcastStats()
                 }
             }

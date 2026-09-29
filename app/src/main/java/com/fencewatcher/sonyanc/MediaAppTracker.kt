@@ -87,26 +87,33 @@ object MediaAppTracker {
      *  2. [notifiedPackages] — apps holding a live media notification. Weaker, since
      *     a paused app keeps its notification, but far better than allowing
      *     everything when a non-allowlisted app is the one playing.
-     *  3. Nothing known — allow, so a missing permission cannot silently disable
-     *     the headline feature.
+     *  3. Nothing known — **deny**.
+     *
+     * Tier 3 used to allow. That made the filter appear to be on while ignoring the
+     * list entirely, because the two ways attribution can fail (listener never
+     * bound, or no session visible) both ended in "allow". If the user has chosen
+     * an allowlist, "I cannot tell what is playing" must not mean "trigger" — the
+     * failure has to be visible instead of silent.
      */
     fun isAllowed(allowlist: Set<String>): Boolean {
         if (allowlist.isEmpty()) return true
 
         val playing = playingPackages
         if (playing.isNotEmpty()) {
-            Log.d(TAG, "tier=session playing=$playing allowed=${playing.any { it in allowlist }}")
-            return playing.any { it in allowlist }
+            val ok = playing.any { it in allowlist }
+            Log.d(TAG, "tier=session playing=$playing allowed=$ok")
+            return ok
         }
 
         val notified = notifiedPackages()
         if (notified.isNotEmpty()) {
-            Log.w(TAG, "tier=notification (no playing session) $notified")
-            return notified.any { it in allowlist }
+            val ok = notified.any { it in allowlist }
+            Log.w(TAG, "tier=notification (no playing session) $notified allowed=$ok")
+            return ok
         }
 
-        Log.w(TAG, "tier=allow-all (nothing attributable)")
-        return true
+        Log.w(TAG, "tier=deny (nothing attributable — allowlist set, so not triggering)")
+        return false
     }
 
     fun reset() {

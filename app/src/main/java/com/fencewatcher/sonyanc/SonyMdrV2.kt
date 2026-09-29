@@ -409,22 +409,32 @@ object SonyMdrV2 {
     const val VOICE_TYPE_VOLUME = 0x20
 
     /**
-     * The XM6 answers the generic [VOICE_TYPE_VOLUME] subtype but only honours
-     * values 0–5; anything higher is rejected and the value springs back.
+     * Voice guidance volume is a **signed** five-step scale: -2, -1, 0, +1, +2.
      *
-     * `VOLUME_SETTING_FIXED_TO_5_STEPS` (0x21) is documented for headsets with a
-     * fixed 5-step control, but the XM6 does *not* respond to it at all — trying
-     * it made the slider stop working entirely. So: use 0x20 and clamp the range
-     * rather than switching subtype.
+     * `VoiceGuidanceSetParamVolume` declares `Int8 volumeValue` with range -2..2.
+     * Reading that byte as unsigned turns -1 into 255, and clamping the slider to
+     * a 0..5 range then pins it at the maximum — which looked exactly like a
+     * broken slider. Values outside -2..2 are rejected by the device and the
+     * position springs back, which is why only the first few steps ever stuck.
      */
-    const val VOICE_GUIDANCE_MAX = 5
+    const val VOICE_GUIDANCE_MIN = -2
+    const val VOICE_GUIDANCE_MAX = 2
 
     fun buildVoiceGuidanceVolumeGet(): ByteArray =
         byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte())
+
     fun buildVoiceGuidanceVolumeSet(volume: Int): ByteArray = byteArrayOf(
         CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte(),
-        volume.coerceIn(0, VOICE_GUIDANCE_MAX).toByte(), 0x00,
+        volume.coerceIn(VOICE_GUIDANCE_MIN, VOICE_GUIDANCE_MAX).toByte(), 0x00,
     )
+
+    /** Decode a voice-guidance volume reply as the signed Int8 it actually is. */
+    fun decodeVoiceGuidanceVolume(p: ByteArray, subtype: Int = VOICE_TYPE_VOLUME): Int? {
+        if (p.size < 3) return null
+        if ((p[1].toInt() and 0xFF) != subtype) return null
+        val v = p[2].toByte().toInt()
+        return if (v in VOICE_GUIDANCE_MIN..VOICE_GUIDANCE_MAX) v else null
+    }
 
     // ---- Link control (POWER family, T1) — pairing mode ----
     //

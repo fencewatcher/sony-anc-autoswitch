@@ -99,10 +99,12 @@ class MediaPlaybackMonitor(
         if (allowlist.isEmpty()) return true  // no filtering
 
         if (!MediaAppTracker.trackingEnabled) {
-            // Without the bound listener we cannot attribute playback at all.
-            // Allow rather than silently disabling the headline feature.
-            Log.w(tag, "Allowlist active but notification access is not granted — allowing all")
-            return true
+            // Without a bound listener we cannot attribute playback to any app.
+            // This used to allow, which is why the allowlist looked installed but
+            // never filtered anything: the failure mode was indistinguishable
+            // from "no filter". Deny instead, and make the reason loud.
+            Log.w(tag, "tier=deny — allowlist set but notification access is not granted")
+            return false
         }
 
         val playing = MediaAppTracker.playingPackages

@@ -171,10 +171,13 @@ class MainActivity : AppCompatActivity() {
                         "Playback is pinned here — it will not switch to another device."
                     else -> "Playback can move between paired devices."
                 }
-                val vg = intent.getIntExtra(EXTRA_VOICE_GUIDANCE_VOLUME, -1)
-                if (vg >= 0) {
+                // The wire value is signed -2..+2, so -1/-2 are legitimate values and
+                // cannot double as the "absent" sentinel.
+                val vg = intent.getIntExtra(EXTRA_VOICE_GUIDANCE_VOLUME, Int.MAX_VALUE)
+                if (vg in -2..2) {
                     updatingUi = true
-                    binding.seekVoiceGuidance.progress = vg
+                    binding.seekVoiceGuidance.progress = vg + 2
+                    binding.textVoiceGuidanceValue?.text = "Level $vg"
                     updatingUi = false
                 }
                 renderMultiPoint()
@@ -312,7 +315,9 @@ class MainActivity : AppCompatActivity() {
         binding.seekVoiceGuidance.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
                 if (!fromUser || updatingUi) return
-                sendToService(ACTION_SET_VOICE_GUIDANCE) { putExtra("value", p) }
+                // Slider is 0..4; the wire value is the signed scale -2..+2.
+                sendToService(ACTION_SET_VOICE_GUIDANCE) { putExtra("value", p - 2) }
+                binding.textVoiceGuidanceValue?.text = "Level ${p - 2}"
             }
             override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
             override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
