@@ -26,18 +26,19 @@
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough, and auto-ambient settings
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **📶 Multipoint control** — List paired devices, switch playback between them, connect/disconnect, and unpair
-- **⏸️ Pause auto-ANC** — Toggle in the notification to temporarily stop media reactions (manual buttons still work)
+- **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification. Both stay in sync, and Routines says plainly that its rules are not firing.
 - **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Dashboard tab
 - **🔋 Battery + mode display** — See battery level and current ANC mode in the headphone card
 - **🔄 Auto-reconnect** — Reconnects with exponential backoff if Bluetooth drops
 
-### Dashboard / Settings / EQ tabs
+### Home / Audio / Devices / Routines tabs
 
 | Tab | Content |
 |---|---|
-| **Dashboard** | Headphone card (model, battery, mode), Start/Stop, quick NC/Ambient/Off |
-| **Settings** | Device selector, ambient level slider, voice passthrough, auto-ambient, playback lock, pairing mode, multipoint device list |
-| **EQ** | 8 preset buttons + visual frequency response curve with draggable band dots |
+| **Home** | Headphone card (model, battery, mode), Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
+| **Audio** | 8 EQ presets + draggable frequency curve, ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken off, DSEE Extreme, BGM, upmix, auto power off, voice guidance |
+| **Devices** | Headphone picker, multipoint device list, playback lock, pairing mode |
+| **Routines** | Automation rules — when media starts or stops, what the headphones do |
 
 ---
 

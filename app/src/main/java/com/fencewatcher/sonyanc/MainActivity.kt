@@ -65,6 +65,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRI
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SWITCH_CONTROL_SUPPORTED
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FIX_PLAYBACK
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_PAUSED
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_TOGGLE_AUTO
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
@@ -165,6 +167,10 @@ class MainActivity : AppCompatActivity() {
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
+                if (intent.hasExtra(EXTRA_AUTO_PAUSED)) {
+                    autoPaused = intent.getBooleanExtra(EXTRA_AUTO_PAUSED, false)
+                    updatePauseUi()
+                }
                 val swSupported = intent.getBooleanExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, true)
                 // Advisory only. A support-flag parse mistake previously disabled the
                 // lock outright, which turns "the parse is wrong" into "the feature is
@@ -218,7 +224,6 @@ class MainActivity : AppCompatActivity() {
         binding.tabAudio.setOnClickListener { switchTab(1) }
         binding.tabDevices.setOnClickListener { switchTab(2) }
         binding.tabRoutines.setOnClickListener { switchTab(3) }
-        binding.tabSettings.setOnClickListener { switchTab(4) }
         // Every pane starts `gone` in the layout and switchTab() was only ever
         // called from a click, so the app opened on a blank screen. Show Home.
         switchTab(0)
@@ -267,6 +272,15 @@ class MainActivity : AppCompatActivity() {
             if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
             binding.textMultiPointStatus.text = "Refreshing…"
             sendToService(ACTION_REFRESH_DEVICES) {}
+        }
+
+        // Pause auto-switching. The notification action existed but the UI could not
+        // read the resulting state, so this was invisible outside the shade.
+        binding.btnPauseAuto.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+            sendToService(ACTION_TOGGLE_AUTO) {}
+            autoPaused = !autoPaused
+            updatePauseUi()
         }
 
         // ---- Multipoint: lock playback + pairing mode ----
@@ -365,17 +379,17 @@ class MainActivity : AppCompatActivity() {
         showingTab = tab
         val panes = listOf(
             binding.homeContent, binding.audioContent, binding.devicesContent,
-            binding.routinesContent, binding.settingsContent,
+            binding.routinesContent,
         )
         panes.forEachIndexed { i, v -> v.visibility = if (i == tab) View.VISIBLE else View.GONE }
 
         val labels = listOf(
             binding.tabHome, binding.tabAudio, binding.tabDevices,
-            binding.tabRoutines, binding.tabSettings,
+            binding.tabRoutines,
         )
         val underlines = listOf(
             binding.underlineHome, binding.underlineAudio, binding.underlineDevices,
-            binding.underlineRoutines, binding.underlineSettings,
+            binding.underlineRoutines,
         )
         val active = Color.rgb(240, 240, 240)
         val muted = Color.rgb(138, 138, 138)
@@ -398,6 +412,35 @@ class MainActivity : AppCompatActivity() {
 
     private var automationRules: List<Automation.Rule> = emptyList()
 
+    /** Mirrors the service's autoPaused so Home and Routines agree with the notification. */
+    private var autoPaused = false
+
+    private fun updatePauseUi() {
+        binding.textAutoPaused.visibility = if (autoPaused) View.VISIBLE else View.GONE
+        binding.btnPauseAuto.text = if (autoPaused) "▶ Resume auto-switching" else "⏸ Pause auto-switching"
+        binding.btnPauseAuto.setBackgroundColor(if (autoPaused) Color.rgb(68, 136, 102) else Color.rgb(90, 90, 90))
+        updateAutomationSummary()
+    }
+
+    /** Header on the Routines tab: how many rules are live, and whether pause is blocking them. */
+    private fun updateAutomationSummary() {
+        val active = automationRules.count { it.enabled }
+        val total = automationRules.size
+        when {
+            autoPaused -> {
+                binding.textAutomationSummary.visibility = View.VISIBLE
+                binding.textAutomationSummary.text = "⏸ Paused — $active of $total rules will not fire"
+                binding.textAutomationSummary.setTextColor(Color.rgb(255, 198, 92))
+            }
+            total > 0 -> {
+                binding.textAutomationSummary.visibility = View.VISIBLE
+                binding.textAutomationSummary.text = "$active of $total rules active · first match wins"
+                binding.textAutomationSummary.setTextColor(Color.rgb(127, 212, 168))
+            }
+            else -> binding.textAutomationSummary.visibility = View.GONE
+        }
+    }
+
     private fun loadAutomation() {
         automationRules = Automation.load(this)
         renderAutomation()
@@ -410,6 +453,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderAutomation() {
+        updateAutomationSummary()
         val box = binding.automationList
         box.removeAllViews()
         if (automationRules.isEmpty()) {
@@ -425,17 +469,32 @@ class MainActivity : AppCompatActivity() {
             val row = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, 12, 0, 12)
+                setPadding(0, 10, 0, 10)
                 isClickable = true
                 setBackgroundColor(if (rule.enabled) 0x22334466 else 0x00000000)
             }
-            val label = android.widget.TextView(this).apply {
-                text = "When ${rule.trigger.label.lowercase()}\n→ ${Automation.describe(rule)}"
-                textSize = 13f
-                setTextColor(if (rule.enabled) Color.rgb(220, 220, 220) else Color.rgb(120, 120, 120))
-                setPadding(12, 0, 8, 0)
+            // Order is the rule's behaviour, not decoration — the first match wins.
+            row.addView(android.widget.TextView(this).apply {
+                text = "${index + 1}"
+                textSize = 12f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(if (rule.enabled) Color.rgb(127, 212, 168) else Color.rgb(110, 110, 110))
+                setPadding(0, 0, 10, 0)
+            })
+            val labels = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
             }
-            row.addView(label, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            labels.addView(android.widget.TextView(this).apply {
+                text = rule.trigger.label.lowercase().replaceFirstChar { it.uppercase() }
+                textSize = 11f
+                setTextColor(if (rule.enabled) Color.rgb(150, 150, 150) else Color.rgb(100, 100, 100))
+            })
+            labels.addView(android.widget.TextView(this).apply {
+                text = Automation.describe(rule)
+                textSize = 14f
+                setTextColor(if (rule.enabled) Color.rgb(230, 230, 230) else Color.rgb(120, 120, 120))
+            })
+            row.addView(labels, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
             val toggle = android.widget.Switch(this).apply {
                 isChecked = rule.enabled
@@ -454,6 +513,14 @@ class MainActivity : AppCompatActivity() {
                 true
             }
             box.addView(row)
+        }
+        if (automationRules.isNotEmpty()) {
+            box.addView(android.widget.TextView(this).apply {
+                text = "Tap a rule to edit it · long-press to delete · order matters, first match wins"
+                textSize = 11f
+                setTextColor(Color.rgb(110, 110, 110))
+                setPadding(4, 12, 0, 0)
+            })
         }
     }
 

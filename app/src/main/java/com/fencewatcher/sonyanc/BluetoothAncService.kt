@@ -115,6 +115,9 @@ class BluetoothAncService : Service() {
                     autoPaused = !autoPaused
                     Log.d(tag, "Auto-pause: ${if (autoPaused) "PAUSED" else "RUNNING"}")
                     refreshNotification()
+                    // The UI could never show this state before: autoPaused was not in
+                    // broadcastStats(), so the notification was the only place it existed.
+                    broadcastStats()
                 }
 
                 ACTION_SET_EQ -> {
@@ -1217,6 +1220,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
+            putExtra(EXTRA_AUTO_PAUSED, autoPaused)
             sourceSwitchControlSupported?.let { putExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, it) }
             putExtra(EXTRA_PAIRING_MODE, pairingMode)
             putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
@@ -1263,6 +1267,7 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
         const val ACTION_PAIRED_DEVICE_ACTION = "$PACKAGE.action.PAIRED_DEVICE_ACTION"
         const val EXTRA_FIX_PLAYBACK = "fix_playback"
+        const val EXTRA_AUTO_PAUSED = "auto_paused"
         const val EXTRA_PAIRING_MODE = "pairing_mode"
         const val EXTRA_SWITCH_CONTROL_SUPPORTED = "switch_control_supported"
 
