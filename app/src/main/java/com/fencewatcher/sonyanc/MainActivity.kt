@@ -230,9 +230,12 @@ class MainActivity : AppCompatActivity() {
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
-        binding.btnQuickNC.setOnClickListener { sendCommand(ACTION_ANC_ON) }
-        binding.btnQuickAmbient.setOnClickListener { sendCommand(ACTION_AMBIENT) }
-        binding.btnQuickOff.setOnClickListener { sendCommand(ACTION_ANC_OFF) }
+        // ---- Ambient sound control: the three modes live in one card, and the active
+        // one is highlighted. The old quick buttons gave no feedback about which mode
+        // was actually selected, so you had to read the notification to know.
+        binding.btnModeNC.setOnClickListener { sendCommand(ACTION_ANC_ON) }
+        binding.btnModeAmbient.setOnClickListener { sendCommand(ACTION_AMBIENT) }
+        binding.btnModeOff.setOnClickListener { sendCommand(ACTION_ANC_OFF) }
 
         // Settings
         binding.btnRefresh.setOnClickListener { onRefreshClicked() }
@@ -260,13 +263,6 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2, "User 2") }
         binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
 
-        // Power Off
-        binding.btnPowerOff.setOnClickListener {
-            if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
-            sendToService(ACTION_POWER_OFF) {}
-            Toast.makeText(this, "Powering off…", Toast.LENGTH_SHORT).show()
-        }
-
         // ---- Multipoint ----
         binding.btnRefreshDevices.setOnClickListener {
             if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
@@ -274,12 +270,19 @@ class MainActivity : AppCompatActivity() {
             sendToService(ACTION_REFRESH_DEVICES) {}
         }
 
-        // Pause auto-switching. The notification action existed but the UI could not
-        // read the resulting state, so this was invisible outside the shade.
-        binding.btnPauseAuto.setOnClickListener {
-            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+        // Pause auto-switching. Lives as a switch on one row: the banner + button it
+        // replaced were two full-width blocks for one bit of state, which is what made
+        // Home feel crowded.
+        binding.switchAuto.setOnCheckedChangeListener { _, checked ->
+            if (suppressAutoSwitch) return@setOnCheckedChangeListener
+            if (!BluetoothAncService.isRunning) {
+                binding.switchAuto.isChecked = !checked
+                toast("Start service first")
+                return@setOnCheckedChangeListener
+            }
+            if (checked == autoPaused) return@setOnCheckedChangeListener
             sendToService(ACTION_TOGGLE_AUTO) {}
-            autoPaused = !autoPaused
+            autoPaused = checked
             updatePauseUi()
         }
 
@@ -415,10 +418,20 @@ class MainActivity : AppCompatActivity() {
     /** Mirrors the service's autoPaused so Home and Routines agree with the notification. */
     private var autoPaused = false
 
+    /** Set while writing state into switchAuto, so the listener does not fire a command. */
+    private var suppressAutoSwitch = false
+
     private fun updatePauseUi() {
-        binding.textAutoPaused.visibility = if (autoPaused) View.VISIBLE else View.GONE
-        binding.btnPauseAuto.text = if (autoPaused) "▶ Resume auto-switching" else "⏸ Pause auto-switching"
-        binding.btnPauseAuto.setBackgroundColor(if (autoPaused) Color.rgb(68, 136, 102) else Color.rgb(90, 90, 90))
+        suppressAutoSwitch = true
+        binding.switchAuto.isChecked = !autoPaused
+        suppressAutoSwitch = false
+        binding.textAutoSwitch.text = if (autoPaused) "⏸ Auto-switching paused" else "⚡ Auto-switching"
+        binding.textAutoSwitch.setTextColor(
+            if (autoPaused) Color.rgb(255, 198, 92) else Color.rgb(224, 224, 224)
+        )
+        binding.cardAutoSwitch.setCardBackgroundColor(
+            if (autoPaused) Color.rgb(48, 40, 24) else Color.rgb(45, 45, 45)
+        )
         updateAutomationSummary()
     }
 
@@ -906,5 +919,43 @@ class MainActivity : AppCompatActivity() {
     private fun updateCardStats() {
         binding.textBattery.text = battery?.let { "🔋$it%" } ?: "🔋—"
         binding.textMode.text = "🎧 $currentMode"
+        updateModeHighlight()
+    }
+
+    /**
+     * Sony-style feedback: the selected mode is the filled circle, the rest are
+     * outlines. The old quick-mode buttons were static colours, so nothing on the
+     * screen said which mode was actually active.
+     */
+    private fun updateModeHighlight() {
+        val m = currentMode
+        setModeState(binding.btnModeNC, binding.labelModeNC, m == "NC")
+        setModeState(binding.btnModeAmbient, binding.labelModeAmbient, m.startsWith("Ambient"))
+        setModeState(binding.btnModeOff, binding.labelModeOff, m == "Off" || m == "—")
+    }
+
+    private fun setModeState(
+        icon: android.widget.TextView,
+        label: android.widget.TextView,
+        active: Boolean,
+    ) {
+        // Drives the bg_mode_circle selector: selected = filled.
+        icon.isSelected = active
+        label.setTextColor(if (active) Color.rgb(224, 224, 224) else Color.rgb(138, 138, 138))
+    }
+
+    override fun onCreateOptionsMenu(menu: android.view.Menu): Boolean {
+        menuInflater.inflate(R.menu.menu_main, menu)
+        return true
+    }
+
+    override fun onOptionsItemSelected(item: android.view.MenuItem): Boolean {
+        if (item.itemId == R.id.actionPowerOff) {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return true }
+            sendToService(ACTION_POWER_OFF) {}
+            Toast.makeText(this, "Powering off…", Toast.LENGTH_SHORT).show()
+            return true
+        }
+        return super.onOptionsItemSelected(item)
     }
 }
