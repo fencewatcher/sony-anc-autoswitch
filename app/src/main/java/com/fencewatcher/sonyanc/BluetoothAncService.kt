@@ -559,7 +559,7 @@ class BluetoothAncService : Service() {
             }
 
             SonyMdrV2.CMD_PERI_RET_PARAM, SonyMdrV2.CMD_PERI_NTFY_PARAM -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PERI_TYPE_SOURCE_SWITCH_CONTROL) {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PERI_TYPE_SOURCE_SWITCH) {
                     val v = p[2].toInt() and 0xFF
                     if (v <= 1) {
                         playbackFixed = v == 0x01
