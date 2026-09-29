@@ -209,6 +209,13 @@ class BluetoothAncService : Service() {
 
                 ACTION_GET_FRAME_LOG -> pushFrameLog()
 
+                ACTION_SYNC_STATE -> {
+                    scope.launch {
+                        queryAllState()
+                        broadcastStats()
+                    }
+                }
+
                 ACTION_SEND_RAW -> {
                     val hex = intent.getStringExtra("hex")
                     val bytes = hex?.let { parseHex(it) }
@@ -1775,6 +1782,13 @@ class BluetoothAncService : Service() {
 
         /** Re-send the current log without clearing it. */
         const val ACTION_GET_FRAME_LOG = "$PACKAGE.action.GET_FRAME_LOG"
+
+        /**
+         * Re-query everything and re-broadcast. The activity calls this when it
+         * comes to the foreground: the connect sweep only runs once, so opening
+         * the app after that leaves every field stale until the 60s poll.
+         */
+        const val ACTION_SYNC_STATE = "$PACKAGE.action.SYNC_STATE"
 
         /** Minimum gap between frame-log broadcasts to the debug menu. */
         const val FRAME_LOG_PUSH_INTERVAL_MS = 250L

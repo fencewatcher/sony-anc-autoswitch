@@ -61,6 +61,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPSCALING_ST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SYNC_STATE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SOURCE_SWITCH
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_SPEAK_TO_CHAT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_PAUSE_TAKEN_OFF
@@ -339,6 +340,20 @@ class MainActivity : AppCompatActivity() {
                 renderFeatureSwitches()
             }
         }
+    }
+
+    /**
+     * Re-query the headset whenever the app comes to the foreground.
+     *
+     * The connect sweep runs exactly once, at connect. If the service was already
+     * connected when the app was opened — which is the normal case after the
+     * first run — nothing had re-queried anything since, so every field sat stale
+     * until the 60s poll happened to come round. That is what made the newer
+     * widgets look slow: the data was old, not late.
+     */
+    override fun onStart() {
+        super.onStart()
+        sendToService(ACTION_SYNC_STATE) {}
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
