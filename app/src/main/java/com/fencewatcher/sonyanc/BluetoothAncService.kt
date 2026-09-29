@@ -106,6 +106,16 @@ class BluetoothAncService : Service() {
                     scope.launch { sendAncCommandOnce(sonyAmbientCommand()) }
                 }
 
+                // Re-send the ambient payload after the user moves a control, so a
+                // change takes effect on the headphones now rather than on the next
+                // connection. Same frame as ACTION_AMBIENT — the level, voice
+                // passthrough and auto-ambient flags are all carried in it — so
+                // applying them necessarily engages ambient mode.
+                ACTION_APPLY_AMBIENT -> {
+                    Log.d(tag, "Applying ambient settings now")
+                    scope.launch { sendAncCommandOnce(sonyAmbientCommand()) }
+                }
+
                 ACTION_ANC_OFF -> {
                     Log.d(tag, "Debug: manual ANC OFF")
                     scope.launch { sendAncCommandOnce(profile.ancOff(ambientLevel())) }
@@ -1263,6 +1273,7 @@ class BluetoothAncService : Service() {
         const val ACTION_GET_STATUS = "$PACKAGE.action.GET_STATUS"
         const val ACTION_ANC_ON = "$PACKAGE.action.ANC_ON"
         const val ACTION_AMBIENT = "$PACKAGE.action.AMBIENT"
+        const val ACTION_APPLY_AMBIENT = "$PACKAGE.action.APPLY_AMBIENT"
         const val ACTION_ANC_OFF = "$PACKAGE.action.ANC_OFF"
         const val ACTION_TOGGLE_AUTO = "$PACKAGE.action.TOGGLE_AUTO"
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"

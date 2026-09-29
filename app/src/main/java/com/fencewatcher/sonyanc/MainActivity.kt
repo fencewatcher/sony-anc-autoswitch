@@ -33,6 +33,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_STOP
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_APPLY_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ_CUSTOM
@@ -244,10 +245,19 @@ class MainActivity : AppCompatActivity() {
                 binding.textLevelValue.text = (v + 1).toString()
                 if (fromUser) saveSetting("ambient_level", v + 1)
             }
-            override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}; override fun onStopTrackingTouch(s: android.widget.SeekBar?) {}
+            // Pushed on release, not per tick: the bar has 20 steps and every
+            // intermediate value would put a frame on the socket.
+            override fun onStartTrackingTouch(s: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(s: android.widget.SeekBar?) { applyAmbientNow() }
         })
-        binding.switchVoice.setOnCheckedChangeListener { _, c -> saveSetting("voice_passthrough", c) }
-        binding.switchAutoAmbient.setOnCheckedChangeListener { _, c -> saveSetting("auto_ambient", c) }
+        binding.switchVoice.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            saveSetting("voice_passthrough", c); applyAmbientNow()
+        }
+        binding.switchAutoAmbient.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            saveSetting("auto_ambient", c); applyAmbientNow()
+        }
         binding.spinnerDevice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
@@ -415,6 +425,12 @@ class MainActivity : AppCompatActivity() {
         if (tab == 1) {
             binding.eqGraph.bandValues = eqBandValues
             if (BluetoothAncService.isRunning) sendToService(ACTION_GET_STATUS) {}
+        }
+        if (tab == 2 && BluetoothAncService.isRunning && multiMacs.isEmpty()) {
+            // Entering Devices with an empty list used to show "no paired devices"
+            // until the user found and pressed Refresh. Only when empty, so
+            // re-entering the tab does not re-query on every visit.
+            sendToService(ACTION_REFRESH_DEVICES) {}
         }
     }
 
@@ -735,7 +751,14 @@ class MainActivity : AppCompatActivity() {
                     binding.textMultiPointStatus.text = "Switching to $name…"
                 }
             }
-            box.addView(row)
+            box.addView(row, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                // Rows were stacked with no gap, so adjacent devices shared a
+                // border and read as one block.
+                if (i > 0) topMargin = dp(8)
+            })
         }
         val activeName = multiMacs.indices.firstOrNull { multiActive.getOrElse(it) { false } }
             ?.let { multiNames.getOrNull(it) }
@@ -847,6 +870,16 @@ class MainActivity : AppCompatActivity() {
     // App filtering removed: it needed notification-listener access, and the
     // dependency was invisible when missing. Triggering now keys off whether
     // audio is playing at all.
+
+    /**
+     * Re-sends the ambient payload so a change to level / voice passthrough /
+     * auto-ambient reaches the headphones now. These three controls only ever
+     * called saveSetting, so a new value was not heard until the next
+     * connection — the five feature switches below already pushed immediately.
+     */
+    private fun applyAmbientNow() {
+        if (BluetoothAncService.isRunning) sendToService(ACTION_APPLY_AMBIENT) {}
+    }
 
     private fun saveSetting(key: String, value: Any) {
         val addr = selectedAddress ?: return
