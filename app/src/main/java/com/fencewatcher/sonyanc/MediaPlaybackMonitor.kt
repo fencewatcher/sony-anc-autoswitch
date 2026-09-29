@@ -2,8 +2,6 @@ package com.fencewatcher.sonyanc
 
 import android.content.Context
 import android.media.AudioManager
-import android.media.session.MediaSessionManager
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -76,114 +74,41 @@ class MediaPlaybackMonitor(
 
     // ---- App allowlist ----
 
+    /**
+     * Allowlist check based on *real* playback state.
+     *
+     * The previous implementation fell back to the default behaviour most of
+     * the time, for three separate reasons:
+     *
+     *  1. `AudioPlaybackConfiguration.getClientUid()` is a hidden API. Non-SDK
+     *     interface restrictions have blocked that reflection since Android 9,
+     *     so it always returned -1 and the "most accurate" path never ran.
+     *  2. It treated "has a media notification" as "is playing" — but Spotify
+     *     keeps its media notification posted while paused, so a paused app
+     *     still counted as active. This also made ANC trigger spuriously.
+     *  3. With several apps tracked it required *all* of them to be allowed,
+     *     so one lingering notification from a non-allowlisted app blocked
+     *     everything.
+     *
+     * [MediaAppTracker] now derives the playing set from real
+     * `MediaSession` `STATE_PLAYING` through the bound notification listener,
+     * which is accurate on every supported version and event-driven.
+     */
     private fun isAllowedByAllowlist(): Boolean {
         val allowlist = allowlistProvider()
         if (allowlist.isEmpty()) return true  // no filtering
 
-        // Priority 1: currently-playing via UID (most accurate)
-        val current = currentlyPlayingPackage()
-        if (current != null) {
-            Log.d(tag, "Active player UID → $current | allowlist: $allowlist")
-            return current in allowlist
+        if (!MediaAppTracker.trackingEnabled) {
+            // Without the bound listener we cannot attribute playback at all.
+            // Allow rather than silently disabling the headline feature.
+            Log.w(tag, "Allowlist active but notification access is not granted — allowing all")
+            return true
         }
 
-        // Priority 2: notification-tracked packages
-        val active = activeMediaPackages()
-        Log.d(tag, "Notification-tracked packages: $active | allowlist: $allowlist")
-
-        if (active.isNotEmpty()) {
-            if (active.size == 1) return active.first() in allowlist
-            // Multiple tracked — require ALL in allowlist (conservative when ambiguous)
-            return active.all { it in allowlist }
-        }
-
-        // All detection failed (UID blocked on 14+, notif not granted/not posted yet).
-        // Default to ALLOW so the core feature works. The user can verify notif access
-        // is enabled for proper filtering.
-        Log.w(tag, "Cannot detect active app — defaulting to ALLOW. Grant notification access for filtering.")
-        return true
-    }
-
-    /**
-     * Uses AudioManager.activePlaybackConfigurations + UID to find the
-     * app that is *actually producing audio right now* (not just having a
-     * lingering notification). This is the most accurate source.
-     */
-    private fun currentlyPlayingPackage(): String? {
-        try {
-            val configs = audioManager.activePlaybackConfigurations
-            for (cfg in configs) {
-                val usage = cfg.audioAttributes.usage
-                if (usage != android.media.AudioAttributes.USAGE_MEDIA) continue
-                val uid = playbackConfigUid(cfg)
-                if (uid > 0) {
-                    context.packageManager.getPackagesForUid(uid)?.firstOrNull()?.let { return it }
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "currentlyPlayingPackage failed: ${e.message}")
-        }
-        return null
-    }
-
-    /**
-     * Determines which app is currently producing media audio.
-     * Primary source: MediaAppTracker (notification listener, works on all
-     * Android versions incl. 14+). Falls back to best-effort APIs when the
-     * notification listener isn't enabled.
-     */
-    private fun activeMediaPackages(): Set<String> {
-        val packages = mutableSetOf<String>()
-
-        // Primary: notification-listener tracking (cross-version reliable)
-        MediaAppTracker.updateTrackingState(context)
-        if (MediaAppTracker.trackingEnabled) {
-            packages.addAll(MediaAppTracker.currentPackages())
-            if (packages.isNotEmpty()) return packages
-        }
-
-        // Fallback: UID of active playback configurations → package name
-        try {
-            val configs = audioManager.activePlaybackConfigurations
-            for (cfg in configs) {
-                val usage = cfg.audioAttributes.usage
-                val isMedia = usage == android.media.AudioAttributes.USAGE_MEDIA
-                if (!isMedia) continue
-                val uid = playbackConfigUid(cfg)
-                if (uid > 0) {
-                    val pkgs = context.packageManager.getPackagesForUid(uid)
-                    if (pkgs != null) packages.addAll(pkgs)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(tag, "activePlaybackConfigurations failed: ${e.message}")
-        }
-
-        // Fallback 2 (pre-Android 14): MediaSessionManager
-        if (packages.isEmpty() && Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            try {
-                val msm = context.getSystemService(Context.MEDIA_SESSION_SERVICE) as MediaSessionManager
-                val sessions = msm.getActiveSessions(null)
-                for (session in sessions) {
-                    session.packageName?.let { packages.add(it) }
-                }
-            } catch (e: Exception) {
-                Log.w(tag, "MediaSessionManager failed: ${e.message}")
-            }
-        }
-
-        return packages
-    }
-
-    /** getClientUid() isn't public API; retrieve it reflectively. */
-    private fun playbackConfigUid(cfg: android.media.AudioPlaybackConfiguration): Int {
-        return try {
-            val m = android.media.AudioPlaybackConfiguration::class.java
-                .getMethod("getClientUid")
-            m.invoke(cfg) as Int
-        } catch (_: Exception) {
-            -1
-        }
+        val playing = MediaAppTracker.playingPackages
+        val ok = MediaAppTracker.isAllowed(allowlist)
+        Log.d(tag, "playing=$playing allow=$allowlist allowed=$ok")
+        return ok
     }
 
     companion object {
