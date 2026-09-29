@@ -1,5 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Noise cancelling: a head with converging sound waves being cancelled. -->
+<!--
+  Noise cancelling.
+
+  The first version drew a head, two ear cups and a chin as four independent
+  paths, and they did not join up: it rendered as an unrecognisable blob. This
+  is a single continuous silhouette — outer headband, down into the left cup,
+  across the inner headband arc, down the right cup, back up — so there are no
+  seams to misalign.
+-->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
@@ -7,11 +15,5 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12,2C9.79,2 8,3.79 8,6v1h8V6c0,-2.21 -1.79,-4 -4,-4z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M6,9H5.5C5.22,9 5,9.22 5,9.5v5C5,14.78 5.22,15 5.5,15H6V9zM18,9h-0.5v6h0.5c0.28,0 0.5,-0.22 0.5,-0.5v-5C18.5,9.22 18.22,9 18,9z" />
-    <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M8,16v1.5C8,18.99 9.01,20 10.5,20h3c1.49,0 2.5,-1.01 2.5,-2.5V16H8z" />
+        android:pathData="M12,2C7.03,2 3,6.03 3,11v6.5c0,1.38 1.12,2.5 2.5,2.5h2v-8H6.5V11C6.5,7.96 9,4.5 12,4.5s5.5,3.46 5.5,6.5v1H15v8h2.5c1.38,0 2.5,-1.12 2.5,-2.5V11C21,6.03 16.97,2 12,2z" />
 </vector>

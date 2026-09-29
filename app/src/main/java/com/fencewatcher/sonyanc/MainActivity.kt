@@ -935,7 +935,7 @@ class MainActivity : AppCompatActivity() {
         // old holo_green_dark is also a very saturated green; muted to sit with
         // the rest of the palette.
         binding.btnToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (running) Color.rgb(0x4A, 0x22, 0x22) else Color.rgb(0x2E, 0x4A, 0x38)
+            if (running) Color.rgb(0x6A, 0x32, 0x32) else Color.rgb(0x3A, 0x5C, 0x46)
         )
     }
 
@@ -948,8 +948,15 @@ class MainActivity : AppCompatActivity() {
             BluetoothAncService.Status.CONNECTED -> Color.rgb(127, 212, 168)
             BluetoothAncService.Status.ERROR -> Color.rgb(226, 128, 128)
         }
-        val text = if (msg != null) "$status — $msg" else status.name.lowercase()
-            .replaceFirstChar { it.uppercase() }
+        val label = status.name.lowercase().replaceFirstChar { it.uppercase() }
+        // The broadcast message is usually just the status restated ("Disconnected",
+        // "Connected"), so appending it unconditionally rendered
+        // "DISCONNECTED — Disconnected". Only show it when it adds something.
+        val text = if (msg != null && !msg.trim().equals(label, ignoreCase = true)) {
+            "$label — $msg"
+        } else {
+            label
+        }
         updateCardStatus(text)
         binding.textStatus.setTextColor(tint)
     }
