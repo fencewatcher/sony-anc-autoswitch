@@ -53,6 +53,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_CONNECTION_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SENSE_DEBUG
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_LDAC_ACTIVE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ACTIVE_CODEC
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_HEADPHONES_WORN
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
@@ -111,11 +113,20 @@ class MainActivity : AppCompatActivity() {
     private var connectionSoundQuality: Boolean? = null
     private var connectionSpinnerReady = false
 
-    /** Last raw SENSE frame from the service, shown on Home for wearing-detection work. */
+    /**
+     * Last raw SENSE frame from the service. Kept only for the log: the XM6
+     * ignores every SENSE poll, so the wear state comes from the SYSTEM push.
+     */
     private var senseDebug: String? = null
 
     /** null until the headphones report LDAC activity. */
     private var ldacActive: Boolean? = null
+
+    /** Active Bluetooth codec id, or null until first report. */
+    private var activeCodec: Int? = null
+
+    /** true = on head, false = off head, null = unknown. */
+    private var headphonesWorn: Boolean? = null
 
     /**
      * Spinner.setSelection fires onItemSelected asynchronously, so by the time
@@ -197,6 +208,12 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (intent.hasExtra(EXTRA_LDAC_ACTIVE)) {
                     ldacActive = intent.getBooleanExtra(EXTRA_LDAC_ACTIVE, false)
+                }
+                if (intent.hasExtra(EXTRA_ACTIVE_CODEC)) {
+                    activeCodec = intent.getIntExtra(EXTRA_ACTIVE_CODEC, 0xFF)
+                }
+                if (intent.hasExtra(EXTRA_HEADPHONES_WORN)) {
+                    headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
                 }
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
@@ -921,14 +938,32 @@ class MainActivity : AppCompatActivity() {
                 null -> base
             }
         }
-        // Wearing-detection debug: hidden until the headphones actually answer, so
-        // the Home tab stays clean on a device that never emits a SENSE frame.
-        val sense = senseDebug
-        if (sense.isNullOrBlank() || sense == "no SENSE frame yet") {
-            binding.textSenseDebug.visibility = android.view.View.GONE
+        // Wear state, from the unsolicited SYSTEM_NTFY_STATUS push. Hidden until
+        // the first event arrives so the tab stays clean on a device that has
+        // not been worn since connecting.
+        when (headphonesWorn) {
+            true -> {
+                binding.textWearState.visibility = android.view.View.VISIBLE
+                binding.textWearState.text = "Wearing: on head"
+            }
+            false -> {
+                binding.textWearState.visibility = android.view.View.VISIBLE
+                binding.textWearState.text = "Wearing: off head"
+            }
+            null -> binding.textWearState.visibility = android.view.View.GONE
+        }
+
+        // Codec badge. Only the codec in use right now is shown; the full set of
+        // possible values is handled by SonyMdrV2.codecName so an unrecognised one
+        // still reads as something rather than blanking.
+        val codec = activeCodec
+        if (codec == null) {
+            binding.textCodecBadge.visibility = android.view.View.GONE
         } else {
-            binding.textSenseDebug.visibility = android.view.View.VISIBLE
-            binding.textSenseDebug.text = "SENSE: $sense"
+            binding.textCodecBadge.visibility = android.view.View.VISIBLE
+            binding.textCodecBadge.text = SonyMdrV2.codecName(codec)
+            binding.textCodecBadge.backgroundTintList =
+                android.content.res.ColorStateList.valueOf(SonyMdrV2.codecColor(codec))
         }
         updatingUi = false
         renderFeatureStatus()

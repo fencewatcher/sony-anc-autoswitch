@@ -29,7 +29,9 @@ object Automation {
         PLAYBACK_STOP("playback_stop", "Playback stops"),
         DEVICE_CONNECTED("device_connected", "Headphones connect"),
         DEVICE_DISCONNECTED("device_disconnected", "Headphones disconnect"),
-        BATTERY_LOW("battery_low", "Battery drops below 20%");
+        BATTERY_LOW("battery_low", "Battery drops below 20%"),
+        HEADPHONES_ON("headphones_on", "Headphones put on"),
+        HEADPHONES_OFF("headphones_off", "Headphones taken off");
 
         companion object {
             fun from(id: String) = values().firstOrNull { it.id == id } ?: PLAYBACK_START

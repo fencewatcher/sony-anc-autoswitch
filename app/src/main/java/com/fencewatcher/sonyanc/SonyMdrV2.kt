@@ -174,6 +174,52 @@ object SonyMdrV2 {
     const val SYS_TYPE_SMART_TALKING = 0x0C
     const val SYS_TYPE_QUICK_ACCESS = 0x0D
 
+    // ---- Active Bluetooth codec (COMMON group) ----
+    //
+    // Not in the AUDIO group, which is why every e2 02 probe came back silent:
+    // the codec was never reported there.
+    const val CMD_COMMON_GET_STATUS = 0x12
+    const val CMD_COMMON_RET_STATUS = 0x13
+    const val COMMON_TYPE_AUDIO_CODEC = 0x02
+
+    // ---- Wear events (unsolicited) ----
+    //
+    // SYSTEM_NTFY_STATUS type 0x10. The reference calls this
+    // HEAD_GESTURE_TRAINING, but on the XM6 it fires unsolicited on every
+    // don/doff and lands ~120ms before the matching NCASM mode change, so it is
+    // the wear event. A poll (f2 06 / f6 06) returns a frame that never varies
+    // even straight across a wear transition, so the push is the only source.
+    const val CMD_SYSTEM_NTFY_STATUS = 0xF5
+    const val SYS_TYPE_HEAD_GESTURE_TRAINING = 0x10
+
+    /** [buildAudioCodecGet] — the codec actually in use right now. */
+    fun buildAudioCodecGet(): ByteArray =
+        byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_AUDIO_CODEC.toByte())
+
+    /** Every value AudioCodec can take, so an unknown one is still readable. */
+    fun codecName(v: Int): String = when (v) {
+        0x00 -> "Unsettled"
+        0x01 -> "SBC"
+        0x02 -> "AAC"
+        0x10 -> "LDAC"
+        0x20 -> "aptX"
+        0x21 -> "aptX HD"
+        0x30 -> "LC3"
+        0xFE -> "Out of range"
+        0xFF -> "Other"
+        else -> "0x%02x".format(v)
+    }
+
+    /** Distinct badge colour per codec, so the chip reads at a glance. */
+    fun codecColor(v: Int): Int = when (v) {
+        0x10 -> 0xFF2ECC71.toInt() // LDAC — green
+        0x20, 0x21 -> 0xFF3498DB.toInt() // aptX family — blue
+        0x30 -> 0xFF9B59B6.toInt() // LC3 — purple
+        0x02 -> 0xFFE67E22.toInt() // AAC — orange
+        0x01 -> 0xFF7F8C8D.toInt() // SBC — grey
+        else -> 0xFF95A5A6.toInt()
+    }
+
     // ---- Audio params (T1, 0xE0..0xE9) — DSEE / BGM / upmix ----
 
     const val CMD_AUDIO_GET_PARAM = 0xE6

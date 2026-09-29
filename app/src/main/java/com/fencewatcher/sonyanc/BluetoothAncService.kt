@@ -481,6 +481,7 @@ class BluetoothAncService : Service() {
                             delay(60_000L)
                             if (!isActive || btSocket == null) break
                             sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
+                            sendFrame(SonyMdrV2.buildAudioCodecGet())
                             delay(500L)
                             runAutomation(currentPlaybackTrigger())
                         }
@@ -787,6 +788,39 @@ class BluetoothAncService : Service() {
                 broadcastStats()
             }
 
+            // Active codec: [0x13, 0x02, codec]. Only meaningful with a live
+            // stream — idle the XM6 reports AAC, playing reports LDAC.
+            SonyMdrV2.CMD_COMMON_RET_STATUS, 0x15 -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.COMMON_TYPE_AUDIO_CODEC) {
+                    val c = p[2].toInt() and 0xFF
+                    if (c != activeCodec) {
+                        activeCodec = c
+                        Log.d(tag, "Active codec: ${SonyMdrV2.codecName(c)}")
+                    }
+                    broadcastStats()
+                }
+            }
+
+            // Wear event: [0xF5, 0x10, mode, enable]. EnableDisable is inverted
+            // in this protocol, so 0x00 = on head, 0x01 = off head.
+            SonyMdrV2.CMD_SYSTEM_NTFY_STATUS -> {
+                if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.SYS_TYPE_HEAD_GESTURE_TRAINING) {
+                    val enable = p[3].toInt() and 0xFF
+                    val worn = SonyMdrV2.decodeInvertedEnable(enable)
+                    if (worn != null && worn != headphonesWorn) {
+                        headphonesWorn = worn
+                        Log.d(tag, "Wear event: ${if (worn) "ON head" else "OFF head"}")
+                        broadcastStats()
+                        scope.launch {
+                            runAutomation(
+                                if (worn) Automation.Trigger.HEADPHONES_ON
+                                else Automation.Trigger.HEADPHONES_OFF
+                            )
+                        }
+                    }
+                }
+            }
+
             // AUDIO_RET_STATUS carries LDAC activity: [cmd, type, status, ldacEnable].
             // This is the codec readout the protocol does allow — the codec cannot
             // be selected, but whether LDAC is actually running can be observed.
@@ -912,6 +946,10 @@ class BluetoothAncService : Service() {
         // automation rules decide what to do.
         scope.launch {
             delay(300L)  // brief settle, then send immediately
+            // The codec only settles once a stream exists — idle the XM6 reports
+            // AAC, playing reports LDAC — so re-ask on every transition rather
+            // than waiting for the 60s timer.
+            sendFrame(SonyMdrV2.buildAudioCodecGet())
             runAutomation(
                 if (playing) Automation.Trigger.PLAYBACK_START else Automation.Trigger.PLAYBACK_STOP
             )
@@ -1396,8 +1434,21 @@ class BluetoothAncService : Service() {
     var connectionSoundQuality: Boolean? = null
         private set
 
-    /** null until the headphones report whether LDAC is in use. */
+    /** null until the headphones report LDAC is actually in use. */
     var ldacActive: Boolean? = null
+        private set
+
+    /** Active Bluetooth codec id, or null until the first report. */
+    var activeCodec: Int? = null
+        private set
+
+    /**
+     * true = on head, false = off head, null = unknown until the first event.
+     *
+     * Derived from a push only. Polling the wearing detector returns a frame that
+     * does not vary across a don/doff, so this cannot be read on demand.
+     */
+    var headphonesWorn: Boolean? = null
         private set
 
     /** Last raw SENSE frame seen, for the Home debug line. */
@@ -1471,6 +1522,8 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_UPMIX, upmixCinema)
         connectionSoundQuality?.let { putExtra(EXTRA_CONNECTION_MODE, it) }
         ldacActive?.let { putExtra(EXTRA_LDAC_ACTIVE, it) }
+        activeCodec?.let { putExtra(EXTRA_ACTIVE_CODEC, it) }
+        headphonesWorn?.let { putExtra(EXTRA_HEADPHONES_WORN, it) }
         putExtra(EXTRA_SENSE_DEBUG, senseDebug)
             putExtra(EXTRA_FIX_PLAYBACK, playbackFixed)
             putExtra(EXTRA_AUTO_PAUSED, autoPaused)
@@ -1551,6 +1604,9 @@ class BluetoothAncService : Service() {
 
         /** True when the headphones report LDAC is actually in use. */
         const val EXTRA_LDAC_ACTIVE = "ldac_active"
+
+        const val EXTRA_ACTIVE_CODEC = "active_codec"
+        const val EXTRA_HEADPHONES_WORN = "headphones_worn"
 
         const val FRAME_LOG_BROADCAST = "$PACKAGE.action.FRAME_LOG"
         const val EXTRA_FRAME_LOG = "frame_log"
