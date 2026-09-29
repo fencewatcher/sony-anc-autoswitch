@@ -728,7 +728,7 @@ class BluetoothAncService : Service() {
             Automation.ActionType.SET_MODE -> when (rule.action.mode) {
                 Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
                 Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
-                Automation.Mode.OFF -> sendFrame(profile.ancOff())
+                Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
             }
             Automation.ActionType.SET_AMBIENT_LEVEL -> sendFrame(profile.ancOn(rule.action.value))
             Automation.ActionType.SET_VOLUME -> {
@@ -737,9 +737,9 @@ class BluetoothAncService : Service() {
                 sendFrame(SonyMdrV2.buildMusicVolumeGet())
             }
             Automation.ActionType.SET_EQ_PRESET -> {
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR, rule.action.presetId.toByte(), 0x00))
+                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), rule.action.presetId.toByte(), 0x00))
                 delay(120L)
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR))
+                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
             }
         }
         refreshNotification()
