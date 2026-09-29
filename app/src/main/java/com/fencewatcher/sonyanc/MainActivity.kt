@@ -161,6 +161,26 @@ class MainActivity : AppCompatActivity() {
 
     private var suppressQaCallback = false
 
+    private var renderScheduled = false
+
+    /**
+     * Coalesce a burst of status broadcasts into a single redraw.
+     *
+     * queryAllState fires around twenty queries at once and every reply used to
+     * trigger a full synchronous re-render, so the new widgets appeared late and
+     * all together. The data had not arrived slowly — the redraws were queued
+     * behind each other.
+     */
+    private fun markRenderDirty() {
+        if (renderScheduled) return
+        renderScheduled = true
+        binding.root.post {
+            renderScheduled = false
+            renderFeatureSwitches()
+            renderFeatureStatus()
+        }
+    }
+
     /**
      * Show a reported function value without firing the write listener. An
      * unmapped value leaves the spinner alone rather than silently snapping to a
@@ -232,14 +252,11 @@ class MainActivity : AppCompatActivity() {
             // like it only appeared on a change.
             if (intent?.hasExtra(EXTRA_ACTIVE_CODEC) == true) {
                 activeCodec = intent.getIntExtra(EXTRA_ACTIVE_CODEC, 0xFF)
-                renderFeatureStatus()
+                markRenderDirty()
             }
             if (intent?.hasExtra(EXTRA_HEADPHONES_WORN) == true) {
                 headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
-                // The wear glyph lives in renderFeatureSwitches, whose only other
-                // call site is setup. Without this it draws once before the first
-                // reply arrives and then never updates.
-                renderFeatureSwitches()
+                markRenderDirty()
             }
 
             if (intent?.hasExtra(EXTRA_LE_AUDIO) == true) {
@@ -248,12 +265,12 @@ class MainActivity : AppCompatActivity() {
 
             if (intent?.hasExtra(EXTRA_QUICK_ACCESS_FUNCTIONS) == true) {
                 quickAccessFunctions = intent.getIntArrayExtra(EXTRA_QUICK_ACCESS_FUNCTIONS)
-                renderFeatureSwitches()
+                markRenderDirty()
             }
 
             if (intent?.hasExtra(EXTRA_UPSCALING_STATUS) == true) {
                 upscalingStatus = intent.getIntExtra(EXTRA_UPSCALING_STATUS, 0xFF)
-                renderFeatureSwitches()
+                markRenderDirty()
             }
 
             // Multipoint + headphone feature state
