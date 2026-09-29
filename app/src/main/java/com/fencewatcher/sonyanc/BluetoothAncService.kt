@@ -1031,16 +1031,23 @@ class BluetoothAncService : Service() {
         }
     }
 
-    private fun buildNotification(text: String): Notification {
-        val toggleLabel: String
-        val toggleIcon: Int
-        if (autoPaused) {
-            toggleLabel = "▶ Resume"
-            toggleIcon = android.R.drawable.ic_media_play
-        } else {
-            toggleLabel = "⏸ Pause"
-            toggleIcon = android.R.drawable.ic_media_pause
+    private fun buildNotification(statusLine: String?): Notification {
+        val paused = autoPaused
+
+        // Pause state REPLACES the status line instead of being appended to it.
+        // Appending produced "⏸ Automations paused — ⏸ Automations paused",
+        // because the status line and the stats block each carried the same string.
+        val primary = if (paused) "Automations paused" else (statusLine ?: defaultStatusLine())
+
+        val meta = buildString {
+            batteryPercent?.let { append("$it%") }
+            if (currentModeName != "—") {
+                if (isNotEmpty()) append(" · ")
+                append(currentModeName)
+            }
         }
+
+        val expanded = if (meta.isEmpty()) primary else "$primary\n$meta"
 
         val toggleIntent = PendingIntent.getService(
             this,
@@ -1061,47 +1068,48 @@ class BluetoothAncService : Service() {
             Intent(this, BluetoothAncService::class.java).apply { action = ACTION_AMBIENT },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
-        val ancOffIntent = PendingIntent.getService(
+        val openAppIntent = PendingIntent.getActivity(
             this,
-            3,
-            Intent(this, BluetoothAncService::class.java).apply { action = ACTION_ANC_OFF },
+            10,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        // Quick stats: battery + current mode
-        val stats = buildString {
-            if (autoPaused) {
-                append("⏸ Automations paused")
-            } else {
-                if (batteryPercent != null) append("🔋 $batteryPercent%")
-                if (currentModeName != "—") {
-                    if (isNotEmpty()) append(" · ")
-                    append("🎧 $currentModeName")
-                }
-            }
-        }
-
-        val title = "Sony ANC Auto-Switch"
-        val content = if (stats.isNotEmpty()) "$text — $stats" else text
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setSmallIcon(android.R.drawable.ic_media_play)
+            // The shade already shows "Sony ANC Auto" above this, so the model name
+            // is more useful here than repeating the app name.
+            .setContentTitle(profile.modelName)
+            .setContentText(primary)
+            .apply { if (meta.isNotEmpty()) setSubText(meta) }
+            .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
+            .setSmallIcon(R.drawable.ic_stat_headphones)
+            .setContentIntent(openAppIntent)
             .setOngoing(true)
-            .addAction(toggleIcon, toggleLabel, toggleIntent)
-            .addAction(0, "🔇 NC", ancOnIntent)
-            .addAction(0, "🌬 Ambient", ambientIntent)
-            .addAction(0, "⛔ Off", ancOffIntent)
+            // Foreground service notification: it refreshes on every battery tick and
+            // mode change, and must not buzz each time.
+            .setSilent(true)
+            .addAction(
+                if (paused) R.drawable.ic_play else R.drawable.ic_pause,
+                if (paused) "Resume" else "Pause",
+                toggleIntent,
+            )
+            .addAction(R.drawable.ic_mode_nc, "Noise cancelling", ancOnIntent)
+            .addAction(R.drawable.ic_mode_ambient, "Ambient", ambientIntent)
             .build()
     }
 
-    private fun updateNotification(text: String) {
-        val displayText = if (autoPaused) "⏸ Automations paused" else text
-        val notification = buildNotification(displayText)
+    /** Status derived purely from state, used when no transient message is supplied. */
+    private fun defaultStatusLine(): String = when (status) {
+        Status.CONNECTED -> if (isMediaPlaying) "Playing" else "Idle"
+        Status.CONNECTING -> "Connecting…"
+        Status.DISCONNECTED -> "Disconnected"
+        Status.ERROR -> "Error"
+    }
+
+    private fun updateNotification(text: String? = null) {
         try {
-            notificationManager.notify(NOTIFICATION_ID, notification)
+            notificationManager.notify(NOTIFICATION_ID, buildNotification(text))
         } catch (_: Exception) {
             // Race on early startup
         }
@@ -1109,16 +1117,7 @@ class BluetoothAncService : Service() {
 
     /** Refreshes the notification with current stats without changing the main text. */
     private fun refreshNotification() {
-        // Reuse last text by rebuilding with stats (battery/mode changed)
-        val base = when {
-            autoPaused -> "⏸ Automations paused"
-            status == Status.CONNECTED -> if (isMediaPlaying) "▶ Playing" else "⏸ Paused"
-            status == Status.CONNECTING -> "Connecting…"
-            status == Status.DISCONNECTED -> "Disconnected"
-            status == Status.ERROR -> "Error"
-            else -> "—"
-        }
-        updateNotification(base)
+        updateNotification(null)
         broadcastStats()
     }
 
