@@ -60,6 +60,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_FIX_PLAYBACK
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_PAIRED_DEVICE_ACTION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ENTER_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAIRING_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SWITCH_CONTROL_SUPPORTED
@@ -165,10 +166,14 @@ class MainActivity : AppCompatActivity() {
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
                 val swSupported = intent.getBooleanExtra(EXTRA_SWITCH_CONTROL_SUPPORTED, true)
-                binding.btnFixPlayback.isEnabled = swSupported
+                // Advisory only. A support-flag parse mistake previously disabled the
+                // lock outright, which turns "the parse is wrong" into "the feature is
+                // dead" with no way for the user to tell the difference. Keep the
+                // button usable and surface the hint instead of gating on it.
+                binding.btnFixPlayback.isEnabled = true
                 binding.btnFixPlayback.text = when {
-                    !swSupported -> "Fix playback (unsupported)"
                     playbackFixed -> "Playback locked"
+                    !swSupported -> "Fix playback (headset didn't advertise support)"
                     else -> "Fix playback"
                 }
                 pairingModeActive = intent.getBooleanExtra(EXTRA_PAIRING_MODE, false)
@@ -214,6 +219,9 @@ class MainActivity : AppCompatActivity() {
         binding.tabDevices.setOnClickListener { switchTab(2) }
         binding.tabRoutines.setOnClickListener { switchTab(3) }
         binding.tabSettings.setOnClickListener { switchTab(4) }
+        // Every pane starts `gone` in the layout and switchTab() was only ever
+        // called from a click, so the app opened on a blank screen. Show Home.
+        switchTab(0)
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
@@ -223,8 +231,6 @@ class MainActivity : AppCompatActivity() {
 
         // Settings
         binding.btnRefresh.setOnClickListener { onRefreshClicked() }
-        binding.btnChooseApps.setOnClickListener { showAppPicker() }
-        binding.btnNotifAccess.setOnClickListener { openNotifAccessSettings() }
         binding.seekLevel.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: android.widget.SeekBar?, v: Int, fromUser: Boolean) {
                 binding.textLevelValue.text = (v + 1).toString()
@@ -234,10 +240,6 @@ class MainActivity : AppCompatActivity() {
         })
         binding.switchVoice.setOnCheckedChangeListener { _, c -> saveSetting("voice_passthrough", c) }
         binding.switchAutoAmbient.setOnCheckedChangeListener { _, c -> saveSetting("auto_ambient", c) }
-        binding.switchAllowlist.setOnCheckedChangeListener { _, c ->
-            getSharedPreferences("anc_settings", MODE_PRIVATE).edit().putBoolean("allowlist_enabled", c).apply()
-            updateSelectedAppsText()
-            updateAllowlistPermissionWarning() }
         binding.spinnerDevice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
@@ -599,6 +601,22 @@ class MainActivity : AppCompatActivity() {
             }
             row.addView(label, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
             row.addView(macLabel)
+            // Unpair removes this device from the headset's paired list entirely.
+            val unpair = android.widget.Button(this).apply {
+                text = "Unpair"
+                textSize = 11f
+                setTextColor(Color.rgb(255, 150, 150))
+                setPadding(16, 0, 0, 0)
+                setOnClickListener {
+                    if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+                    sendToService(ACTION_PAIRED_DEVICE_ACTION) {
+                        putExtra("mac", multiMacs[i])
+                        putExtra("action", SonyMdrV2.CONN_ACTION_UNPAIR)
+                    }
+                    binding.textMultiPointStatus.text = "Unpairing $name…"
+                }
+            }
+            row.addView(unpair)
             if (!isActive) {
                 row.setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
@@ -710,45 +728,14 @@ class MainActivity : AppCompatActivity() {
         binding.textLevelValue.text = level.toString()
         binding.switchVoice.isChecked = prefs.getBoolean("voice_passthrough_$addr", false)
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
-        binding.switchAllowlist.isChecked = prefs.getBoolean("allowlist_enabled", false)
-        updateSelectedAppsText()
-        updateAllowlistPermissionWarning()
         val name = pairedDevices.find { it.address == addr }?.name ?: ""
         binding.textProfile.text = "Protocol: ${HeadphoneProfile.detect(name).modelName}"
     }
 
-    /**
-     * Make the filter's hard dependency visible.
-     *
-     * Without notification access the system never binds the listener, so
-     * `getActiveSessions()` is never called and the allowlist cannot attribute
-     * playback to any app — it denies every trigger. That used to be visible only
-     * in logcat, so the filter could look enabled while being incapable of
-     * working. Surface it in the UI instead.
-     */
-    private fun updateAllowlistPermissionWarning() {
-        val enabled = getSharedPreferences("anc_settings", MODE_PRIVATE)
-            .getBoolean("allowlist_enabled", false)
-        val hasAccess = MediaAppTracker.isNotificationAccessGranted(this)
-        val w = binding.textAllowlistPermissionWarning
-        val show = enabled && !hasAccess
-        w.visibility = if (show) View.VISIBLE else View.GONE
-        if (show) w.text = "Notification access not granted — the filter can't see which app " +
-            "is playing, so nothing will trigger. Enable \"${getString(R.string.app_name)}\" in " +
-            "Settings > Apps > Special app access > Notification access, then reopen this app."
-    }
 
-    /**
-     * Re-check on every return to the foreground.
-     *
-     * The permission is granted in system Settings, so the activity resumes with
-     * whatever it last computed. Without this the warning stayed visible after
-     * access was granted — reporting "denied" for a permission that was on.
-     */
-    override fun onResume() {
-        super.onResume()
-        updateAllowlistPermissionWarning()
-    }
+    // App filtering removed: it needed notification-listener access, and the
+    // dependency was invisible when missing. Triggering now keys off whether
+    // audio is playing at all.
 
     private fun saveSetting(key: String, value: Any) {
         val addr = selectedAddress ?: return
@@ -757,51 +744,6 @@ class MainActivity : AppCompatActivity() {
         e.apply()
     }
 
-    // ---- App allowlist ----
-
-    private fun allApps(): List<Pair<String, String>> {
-        val pm = packageManager
-        val seen = HashSet<String>()
-        return pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)
-            .mapNotNull { info ->
-                val pkg = info.activityInfo.packageName; if (!seen.add(pkg)) return@mapNotNull null
-                val label = try { pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString() } catch (_: Exception) { pkg }
-                label to pkg
-            }.sortedBy { it.first.lowercase() }
-    }
-
-    private fun showAppPicker() {
-        val apps = allApps(); val labels = apps.map { it.first }.toTypedArray()
-        val prefs = getSharedPreferences("anc_settings", MODE_PRIVATE)
-        val current = prefs.getStringSet("allowlist_apps", emptySet()) ?: emptySet()
-        val checked = BooleanArray(apps.size) { apps[it].second in current }
-        AlertDialog.Builder(this).setTitle("Apps that trigger ANC")
-            .setMultiChoiceItems(labels, checked) { _, w, c -> checked[w] = c }
-            .setPositiveButton("Save") { _, _ ->
-                prefs.edit().putStringSet("allowlist_apps", apps.filterIndexed { i, _ -> checked[i] }.map { it.second }.toSet()).apply()
-                updateSelectedAppsText()
-            }.setNegativeButton("Cancel", null).show()
-    }
-
-    private fun updateSelectedAppsText() {
-        val prefs = getSharedPreferences("anc_settings", MODE_PRIVATE)
-        val s = prefs.getStringSet("allowlist_apps", emptySet()) ?: emptySet()
-        // Show friendly names, not com.spotify.music
-        val labels = s.map { pkg ->
-            runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
-                .getOrDefault(pkg)
-        }.sorted()
-        binding.textSelectedApps.text = when {
-            !prefs.getBoolean("allowlist_enabled", false) -> "App filtering disabled"
-            s.isEmpty() -> "No apps — nothing triggers"
-            else -> labels.joinToString("\n")
-        }
-    }
-
-    private fun openNotifAccessSettings() {
-        try { startActivity(Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")) }
-        catch (e: Exception) { Toast.makeText(this, "Couldn't open notification settings", Toast.LENGTH_SHORT).show() }
-    }
 
     // ---- Helpers ----
 

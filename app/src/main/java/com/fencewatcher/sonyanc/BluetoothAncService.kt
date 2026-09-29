@@ -205,6 +205,28 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+                ACTION_PAIRED_DEVICE_ACTION -> {
+                    val mac = intent.getStringExtra("mac").orEmpty()
+                    val action = intent.getIntExtra("action", SonyMdrV2.CONN_ACTION_DISCONNECT)
+                    val frame = SonyMdrV2.buildPairedDeviceActionSet(action, mac)
+                    if (frame == null) {
+                        Log.w(tag, "Refusing paired-device action: bad MAC '$mac'")
+                    } else {
+                        val what = when (action) {
+                            SonyMdrV2.CONN_ACTION_UNPAIR -> "unpair"
+                            SonyMdrV2.CONN_ACTION_CONNECT -> "connect"
+                            else -> "disconnect"
+                        }
+                        Log.d(tag, "Paired-device $what $mac")
+                        scope.launch {
+                            sendFrame(frame, SonyMdrV2.Table.T2)
+                            delay(400L)
+                            // The device list is stale after a change; re-read it.
+                            refreshMultipoint()
+                        }
+                    }
+                }
+
                 ACTION_SET_FIX_PLAYBACK -> {
                     val fix = intent.getBooleanExtra("fix", false)
                     Log.d(tag, "Fix playback = $fix")
@@ -279,11 +301,7 @@ class BluetoothAncService : Service() {
         return prefs().getBoolean("auto_ambient_$addr", false)
     }
 
-    private fun allowlistEnabled(): Boolean =
-        prefs().getBoolean(KEY_ALLOWLIST_ENABLED, false)
-
-    private fun allowlist(): Set<String> =
-        prefs().getStringSet(KEY_ALLOWLIST, emptySet()) ?: emptySet()
+    // App filtering removed — see MediaPlaybackMonitor.decide.
 
     private fun sonyAmbientCommand(): ByteArray {
         return profile.ambient(
@@ -300,13 +318,8 @@ class BluetoothAncService : Service() {
         broadcastStatus(status)
         updateNotification("Connecting…")
 
-        // Start media playback monitoring immediately (with app filtering)
-        mediaMonitor = MediaPlaybackMonitor(
-            this,
-            allowlistProvider = {
-                if (allowlistEnabled()) allowlist() else emptySet()
-            },
-        ) { playing ->
+                // Start media playback monitoring immediately.
+        mediaMonitor = MediaPlaybackMonitor(this) { playing ->
             onMediaStateChanged(playing)
         }
         mediaMonitor?.start()
@@ -605,7 +618,14 @@ class BluetoothAncService : Service() {
                 val res = SonyMdrV2.decodeSourceSwitchResult(p)
                 if (res != null) {
                     val ok = res.first == SonyMdrV2.SOURCE_SWITCH_SUCCESS
-                    Log.d(tag, "Source switch ${if (ok) "OK" else "FAILED(0x%02x)".format(res.first)} → ${res.second}")
+                    val target = res.second
+                    Log.d(tag, "Source switch ${if (ok) "OK" else "FAILED(0x%02x)".format(res.first)} → $target")
+                    // On this protocol the playback device is reported here, as the
+                    // target address of the source-switch reply — not as a field in
+                    // the device list. Tracking it is what makes "Fix Playback" mean
+                    // anything: the reference only offers the lock on the device that
+                    // is currently playing.
+                    if (target.isNotBlank()) playbackDeviceMac = target
                     if (ok) scope.launch { refreshMultipoint() }
                     broadcastStats()
                 }
@@ -801,7 +821,26 @@ class BluetoothAncService : Service() {
                 Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
                 Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
             }
-            Automation.ActionType.SET_AMBIENT_LEVEL -> sendFrame(profile.ancOn(rule.action.value))
+            Automation.ActionType.SET_AMBIENT_LEVEL -> {
+                // Was `profile.ancOn(rule.action.value)`, which builds
+                // [0x68,0x19,0x01,0x01,0x00,...] — byte 4 = 0x00, i.e. the NC
+                // payload. "Set ambient level" therefore switched noise cancelling
+                // ON instead of changing the ambient level. Use the same builder the
+                // UI uses, with the rule's level overriding the stored one.
+                val saved = ambientLevel()
+                val cmd = profile.ambient(
+                    level = rule.action.value,
+                    voice = voicePassthrough(),
+                    noiseAdaptive = autoAmbient(),
+                )
+                sendFrame(cmd)
+                if (rule.action.value != saved) {
+                    // Persist so the UI slider reflects what the routine just set.
+                    val addr = deviceAddress
+                    if (addr != null)
+                        prefs().edit().putInt("ambient_level_$addr", rule.action.value).apply()
+                }
+            }
             Automation.ActionType.SET_VOLUME -> {
                 // Media volume had no working path on this hardware and was judged
                 // useless, so it was removed rather than left half-wired.
@@ -1131,6 +1170,13 @@ class BluetoothAncService : Service() {
      */
     var sourceSwitchControlSupported: Boolean? = null
         private set
+
+    /**
+     * MAC of the device the headphones currently route audio to, as reported by the
+     * source-switch reply. Null until the headset has told us at least once.
+     */
+    var playbackDeviceMac: String? = null
+        private set
     var voiceGuidanceVolume: Int = -1
         private set
 
@@ -1216,6 +1262,7 @@ class BluetoothAncService : Service() {
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
         const val ACTION_ENTER_PAIRING_MODE = "$PACKAGE.action.ENTER_PAIRING_MODE"
         const val ACTION_SET_FIX_PLAYBACK = "$PACKAGE.action.SET_FIX_PLAYBACK"
+        const val ACTION_PAIRED_DEVICE_ACTION = "$PACKAGE.action.PAIRED_DEVICE_ACTION"
         const val EXTRA_FIX_PLAYBACK = "fix_playback"
         const val EXTRA_PAIRING_MODE = "pairing_mode"
         const val EXTRA_SWITCH_CONTROL_SUPPORTED = "switch_control_supported"
@@ -1258,8 +1305,8 @@ class BluetoothAncService : Service() {
         const val KEY_AMBIENT_LEVEL = "ambient_level"
         const val KEY_VOICE_PASSTHROUGH = "voice_passthrough"
         const val KEY_AMBIENT_NOISE_ADAPTIVE = "ambient_noise_adaptive"
-        const val KEY_ALLOWLIST_ENABLED = "allowlist_enabled"
-        const val KEY_ALLOWLIST = "allowlist_apps"
+        const val KEY_ALLOWLIST_ENABLED = "allowlist_enabled" // unused, retained to clear stale prefs
+        const val KEY_ALLOWLIST = "allowlist_apps" // unused, retained to clear stale prefs
 
         // Broadcast extras
         const val EXTRA_BATTERY = "battery"

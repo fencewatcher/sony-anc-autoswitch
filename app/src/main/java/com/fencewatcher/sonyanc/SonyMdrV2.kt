@@ -261,6 +261,33 @@ object SonyMdrV2 {
     const val PERI_BT_MODE_NORMAL = 0x00
     const val PERI_BT_MODE_INQUIRY_SCAN = 0x01
 
+    /** ConnectivityActionType */
+    const val CONN_ACTION_DISCONNECT = 0x00
+    const val CONN_ACTION_CONNECT = 0x01
+    const val CONN_ACTION_UNPAIR = 0x02
+
+    /**
+     * Disconnect, reconnect, or unpair a paired device.
+     *
+     * `PeripheralSetExtendedParamParingDeviceManagementCommon` is
+     * `[PERI_SET_EXTENDED_PARAM, inquiredType, connectivityActionType, btDeviceAddress]`,
+     * with the address as 17 ASCII characters, e.g. "AA:BB:CC:DD:EE:FF".
+     *
+     * Note the enum's API constants (`MDR_PAIRED_DEVICE_UNPAIR` = 4) are *not* the
+     * wire values — the wire `ConnectivityActionType::UNPAIR` is 0x02.
+     */
+    fun buildPairedDeviceActionSet(action: Int, mac: String): ByteArray? {
+        val addr = mac.trim()
+        // Exactly 17 characters: six octets plus five colons.
+        if (addr.length != 17) return null
+        val out = ByteArray(20)
+        out[0] = CMD_PERI_SET_EXT_PARAM.toByte()
+        out[1] = PERI_TYPE_DEVICE_MANAGEMENT_COD.toByte()
+        out[2] = action.toByte()
+        for (i in addr.indices) out[3 + i] = addr[i].code.toByte()
+        return out
+    }
+
     /**
      * Enter or leave Bluetooth pairing mode.
      *
