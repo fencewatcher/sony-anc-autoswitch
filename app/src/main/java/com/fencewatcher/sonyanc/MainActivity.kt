@@ -187,6 +187,18 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
+            // Codec and wear ride on their own broadcasts, unrelated to the
+            // peripheral sweep below. Reading them inside that block meant they
+            // were only seen when it happened to fire, which made the codec look
+            // like it only appeared on a change.
+            if (intent?.hasExtra(EXTRA_ACTIVE_CODEC) == true) {
+                activeCodec = intent.getIntExtra(EXTRA_ACTIVE_CODEC, 0xFF)
+                renderFeatureStatus()
+            }
+            if (intent?.hasExtra(EXTRA_HEADPHONES_WORN) == true) {
+                headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
+            }
+
             // Multipoint + headphone feature state
             if (intent?.hasExtra(EXTRA_PERIPHERAL_OK) == true) {
                 peripheralSupported = intent.getBooleanExtra(EXTRA_PERIPHERAL_OK, false)
@@ -209,16 +221,6 @@ class MainActivity : AppCompatActivity() {
                 if (intent.hasExtra(EXTRA_LDAC_ACTIVE)) {
                     ldacActive = intent.getBooleanExtra(EXTRA_LDAC_ACTIVE, false)
                 }
-                if (intent.hasExtra(EXTRA_ACTIVE_CODEC)) {
-                    activeCodec = intent.getIntExtra(EXTRA_ACTIVE_CODEC, 0xFF)
-                }
-                if (intent.hasExtra(EXTRA_HEADPHONES_WORN)) {
-                    headphonesWorn = intent.getBooleanExtra(EXTRA_HEADPHONES_WORN, false)
-                }
-                // The feature line has its own single call site, so a codec that
-                // arrives without any other state change would sit unread until
-                // something else happened to trigger a refresh.
-                renderFeatureStatus()
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
                 playbackFixed = intent.getBooleanExtra(EXTRA_FIX_PLAYBACK, false)
                 if (intent.hasExtra(EXTRA_AUTO_PAUSED)) {
