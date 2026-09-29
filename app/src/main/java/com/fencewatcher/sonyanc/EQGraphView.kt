@@ -7,9 +7,13 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * Custom EQ frequency response graph.
- * Draws a grid, frequency response curve, and draggable band dots.
- * 10 bands (31Hz–16kHz), -6..+6 dB range.
+ * EQ frequency response graph.
+ *
+ * Redrawn to actually read as an equaliser: it sits transparent on the card
+ * instead of painting its own opaque panel, uses the app's green accent rather
+ * than a stray blue, shows a labelled -6..+6 dB axis, and fills under the curve.
+ *
+ * 10 bands (31Hz-16kHz), -6..+6 dB.
  */
 class EQGraphView @JvmOverloads constructor(
     context: Context, attrs: AttributeSet? = null, defStyle: Int = 0,
@@ -31,73 +35,80 @@ class EQGraphView @JvmOverloads constructor(
     /** Callback when a band value changes via drag: (bandIndex, newValue). */
     var onBandChanged: ((Int, Int) -> Unit)? = null
 
-    // Colors
-    private val bgColor = Color.rgb(30, 30, 30)
-    private val gridColor = Color.rgb(60, 60, 60)
-    private val lineColor = Color.rgb(80, 200, 255)
-    private val lineAlpha = 160
-    private val dotFillColor = Color.rgb(80, 200, 255)
-    private val dotStrokeColor = Color.WHITE
-    private val labelColor = Color.rgb(160, 160, 160)
-    private val disabledColor = Color.rgb(100, 100, 100)
-    private val centerLineColor = Color.rgb(80, 80, 80)
+    // Everything below is sized in dp. The previous version used raw pixels,
+    // which is why the axis labels and handles drifted out of proportion to the
+    // rest of the UI on higher-density screens.
+    private val d = resources.displayMetrics.density
+    private fun dp(v: Float) = v * d
 
-    // Layout
-    private val leftMargin = 48f
-    private val rightMargin = 16f
-    private val topMargin = 24f
-    private val bottomMargin = 40f
-    private val dotRadius = 18f
-    private val touchSlop = 36f
+    // Palette: the app accent, not an unrelated blue.
+    private val accent = Color.rgb(127, 212, 168)      // #7FD4A8
+    private val gridMinor = Color.argb(38, 255, 255, 255)
+    private val gridZero = Color.argb(96, 255, 255, 255)
+    private val labelColor = Color.argb(150, 224, 224, 224)
+    private val valueColor = Color.rgb(232, 240, 236)
+    private val dimmed = Color.rgb(120, 120, 120)
 
-    // Paint objects
-    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = gridColor; strokeWidth = 1f }
-    private val centerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = centerLineColor; strokeWidth = 1f }
+    // Layout (dp)
+    private val leftMargin = dp(34f)
+    private val rightMargin = dp(10f)
+    private val topMargin = dp(22f)
+    private val bottomMargin = dp(26f)
+    private val dotRadius = dp(5.5f)
+    private val touchSlop = dp(28f)
+
+    private val axisText = dp(10f)
+    private val freqText = dp(9.5f)
+    private val valueText = dp(10f)
+
+    // Paint
+    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = gridMinor; strokeWidth = dp(1f)
+    }
+    private val zeroPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = gridZero; strokeWidth = dp(1.2f)
+    }
     private val curvePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = lineColor; strokeWidth = 3f; style = Paint.Style.STROKE
+        style = Paint.Style.STROKE
+        strokeWidth = dp(2.2f)
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
     }
-    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(40, 80, 200, 255); style = Paint.Style.FILL
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+    private val dotRing = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE; strokeWidth = dp(1.6f); color = Color.WHITE
     }
-    private val dotFill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = dotFillColor; style = Paint.Style.FILL
+    private val axisLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = axisText; color = labelColor; textAlign = Paint.Align.RIGHT
     }
-    private val dotStroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = dotStrokeColor; style = Paint.Style.STROKE; strokeWidth = 2f
+    private val freqLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = freqText; color = labelColor; textAlign = Paint.Align.CENTER
     }
-    private val labelPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = labelColor; textSize = 28f; textAlign = Paint.Align.CENTER
-    }
-    private val valuePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.WHITE; textSize = 24f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
-    }
-    private val valuePaintDisabled = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = disabledColor; textSize = 24f; textAlign = Paint.Align.CENTER; isFakeBoldText = true
+    private val valueLabel = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        textSize = valueText; textAlign = Paint.Align.CENTER; isFakeBoldText = true
     }
 
     // Touch state
     private var draggingBand = -1
-    private var dragStartY = 0f
-    private var dragStartValue = 0
 
     // ---- Coordinate mapping ----
 
-    private fun plotWidth() = width - leftMargin - rightMargin
-    private fun plotHeight() = height - topMargin - bottomMargin
-    private fun plotCenter() = topMargin + plotHeight() / 2f
+    private fun plotWidth() = (width - leftMargin - rightMargin).coerceAtLeast(1f)
+    private fun plotHeight() = (height - topMargin - bottomMargin).coerceAtLeast(1f)
 
     /** X position for band index (logarithmic scale). */
     private fun bandX(index: Int): Float {
-        val minFreq = bandFreqs.first().toFloat()
-        val maxFreq = bandFreqs.last().toFloat()
-        val freq = bandFreqs[index].toFloat()
-        return leftMargin + (Math.log((freq / minFreq).toDouble()) / Math.log((maxFreq / minFreq).toDouble())).toFloat() * plotWidth()
+        val minFreq = bandFreqs.first().toDouble()
+        val maxFreq = bandFreqs.last().toDouble()
+        val freq = bandFreqs[index].toDouble()
+        val t = (Math.log(freq / minFreq) / Math.log(maxFreq / minFreq)).toFloat()
+        return leftMargin + t * plotWidth()
     }
 
     /** Y position for dB value. */
     private fun bandY(value: Int): Float {
-        val range = 12f  // -6 to +6
-        val ratio = (value + 6) / range
+        val ratio = (value + 6) / 12f
         return topMargin + plotHeight() * (1f - ratio)
     }
 
@@ -112,87 +123,84 @@ class EQGraphView @JvmOverloads constructor(
     override fun onDraw(canvas: Canvas) {
         val pw = plotWidth()
         val ph = plotHeight()
-        val cx = plotCenter()
+        val zeroY = bandY(0)
 
-        // Fill background
-        canvas.drawColor(bgColor)
+        // Deliberately transparent: the surrounding card provides the surface, so
+        // the graph no longer reads as a black box pasted onto it.
+        val points = bandFreqs.indices.map { i -> PointF(bandX(i), bandY(bandValues[i])) }
 
-        // Horizontal grid lines (every 3dB)
+        // Grid: minor lines every 3 dB, with the 0 dB baseline called out.
         for (db in -6..6 step 3) {
             val y = bandY(db)
-            canvas.drawLine(leftMargin, y, leftMargin + pw, y, gridPaint)
-            // dB label
-            if (db == 0) {
-                labelPaint.color = centerLineColor
-                canvas.drawText("0", leftMargin - 8f, y + 10f, labelPaint)
-                labelPaint.color = labelColor
-            } else if (db % 6 == 0) {
-                canvas.drawText("$db", leftMargin - 8f, y + 10f, labelPaint)
-            }
+            canvas.drawLine(leftMargin, y, leftMargin + pw, y, if (db == 0) zeroPaint else gridPaint)
+            val txt = if (db > 0) "+$db" else "$db"
+            canvas.drawText(txt, leftMargin - dp(6f), y + axisText / 3f, axisLabel)
         }
-        // Center line (0 dB) — slightly thicker
-        val centerY = bandY(0)
-        canvas.drawLine(leftMargin, centerY, leftMargin + pw, centerY, centerPaint)
 
-        // Vertical lines at each band
+        // Vertical guides at each band, fading toward the top/bottom.
         for (i in bandFreqs.indices) {
             val x = bandX(i)
             canvas.drawLine(x, topMargin, x, topMargin + ph, gridPaint)
-            // Frequency label
-            val freqLabel = when {
-                bandFreqs[i] >= 1000 -> "${bandFreqs[i] / 1000}k"
-                else -> "${bandFreqs[i]}"
-            }
-            canvas.drawText(freqLabel, x, topMargin + ph + 20f, labelPaint)
+            val f = bandFreqs[i]
+            val txt = if (f >= 1000) "${f / 1000}k" else "$f"
+            canvas.drawText(txt, x, topMargin + ph + freqText + dp(6f), freqLabel)
         }
 
-        // Build response curve points
-        val points = bandFreqs.indices.map { i ->
-            PointF(bandX(i), bandY(bandValues[i]))
-        }
-
-        // Fill under curve
         if (points.size >= 2) {
-            val path = Path()
-            path.moveTo(points[0].x, centerY)
-            for (p in points) path.lineTo(p.x, p.y)
-            path.lineTo(points.last().x, centerY)
-            path.close()
-            canvas.drawPath(path, fillPaint)
-        }
-
-        // Draw curve line
-        if (points.size >= 2) {
-            curvePaint.alpha = if (interactive) lineAlpha else 80
-            val path = Path()
-            path.moveTo(points[0].x, points[0].y)
-            // Smooth cubic bezier through points
-            for (i in 1 until points.size) {
-                val prev = points[i - 1]
-                val cur = points[i]
-                val ctrlX1 = (prev.x + cur.x) / 2
-                val ctrlX2 = ctrlX1
-                path.cubicTo(ctrlX1, prev.y, ctrlX2, cur.y, cur.x, cur.y)
+            // Fill between the curve and the 0 dB baseline, faded out downward.
+            val area = Path().apply {
+                moveTo(points[0].x, zeroY)
+                for (p in points) lineTo(p.x, p.y)
+                lineTo(points.last().x, zeroY)
+                close()
             }
-            canvas.drawPath(path, curvePaint)
+            fillPaint.shader = LinearGradient(
+                0f, topMargin, 0f, topMargin + ph,
+                Color.argb(if (interactive) 66 else 26, 127, 212, 168),
+                Color.argb(0, 127, 212, 168),
+                Shader.TileMode.CLAMP,
+            )
+            canvas.drawPath(area, fillPaint)
 
-            // Draw dots
-            val dotFill = if (interactive) dotFill else Paint(dotFill).apply { color = disabledColor; style = Paint.Style.FILL }
-            val dotStroke = if (interactive) dotStroke else Paint(dotStroke).apply { color = disabledColor; style = Paint.Style.STROKE; strokeWidth = 2f }
-            for ((i, p) in points.withIndex()) {
-                // Highlight the dragged dot
-                if (interactive && draggingBand == i) {
-                    val glow = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                        color = Color.argb(60, 80, 200, 255)
-                        style = Paint.Style.FILL
-                    }
-                    canvas.drawCircle(p.x, p.y, dotRadius + 8f, glow)
+            // Response curve, smooth through the band points.
+            curvePaint.color = if (interactive) accent else dimmed
+            curvePaint.alpha = if (interactive) 255 else 120
+            val line = Path().apply {
+                moveTo(points[0].x, points[0].y)
+                for (i in 1 until points.size) {
+                    val prev = points[i - 1]
+                    val cur = points[i]
+                    val mid = (prev.x + cur.x) / 2f
+                    cubicTo(mid, prev.y, mid, cur.y, cur.x, cur.y)
                 }
-                canvas.drawCircle(p.x, p.y, dotRadius, dotFill)
-                canvas.drawCircle(p.x, p.y, dotRadius, dotStroke)
-                // Value label above dot
-                val vp = if (interactive) valuePaint else valuePaintDisabled
-                canvas.drawText("${bandValues[i]}", p.x, p.y - dotRadius - 6f, vp)
+            }
+            canvas.drawPath(line, curvePaint)
+
+            // Band handles.
+            dotFill.color = if (interactive) accent else dimmed
+            dotRing.color = if (interactive) Color.WHITE else dimmed
+            valueLabel.color = if (interactive) valueColor else dimmed
+            for ((i, p) in points.withIndex()) {
+                val dragging = interactive && draggingBand == i
+                val r = if (dragging) dotRadius * 1.5f else dotRadius
+                if (dragging) {
+                    canvas.drawCircle(
+                        p.x, p.y, r + dp(5f),
+                        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            color = Color.argb(60, 127, 212, 168); style = Paint.Style.FILL
+                        },
+                    )
+                }
+                canvas.drawCircle(p.x, p.y, r, dotFill)
+                canvas.drawCircle(p.x, p.y, r, dotRing)
+
+                // Signed value, placed above a raised band and below a lowered
+                // one so it never runs off the top or collides with the handle.
+                val v = bandValues[i]
+                val signed = if (v > 0) "+$v" else "$v"
+                val above = v >= 0
+                val ty = if (above) p.y - r - dp(4f) else p.y + r + valueText
+                canvas.drawText(signed, p.x, ty, valueLabel)
             }
         }
     }
@@ -210,20 +218,18 @@ class EQGraphView @JvmOverloads constructor(
                 for (i in bandFreqs.indices) {
                     val dx = event.x - bandX(i)
                     val dy = event.y - bandY(bandValues[i])
-                    val d = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                    if (d < bestDist && d < touchSlop) {
-                        bestDist = d
+                    val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                    if (dist < bestDist && dist < touchSlop) {
+                        bestDist = dist
                         best = i
                     }
                 }
                 if (best >= 0) {
                     draggingBand = best
-                    dragStartY = event.y
-                    dragStartValue = bandValues[best]
                     // This view lives inside a ScrollView. Once a drag actually
                     // starts, the parent must stop intercepting — otherwise a
                     // vertical finger movement is stolen by the page scroll and
-                    // the dot can never be set precisely.
+                    // the handle can never be set precisely.
                     parent?.requestDisallowInterceptTouchEvent(true)
                     return true
                 }
@@ -252,7 +258,7 @@ class EQGraphView @JvmOverloads constructor(
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val w = MeasureSpec.getSize(widthMeasureSpec)
-        val h = (w * 0.45f).toInt().coerceAtLeast(200)
+        val h = (w * 0.52f).toInt().coerceAtLeast((180 * d).toInt())
         setMeasuredDimension(w, h)
     }
 }
