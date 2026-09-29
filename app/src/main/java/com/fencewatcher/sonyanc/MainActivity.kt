@@ -1030,9 +1030,14 @@ class MainActivity : AppCompatActivity() {
                 null -> base
             }
         }
-        // Quick Access. Hidden until the device answers: the model gate is
-        // negotiated at runtime and could not be confirmed for the XM6 from the
-        // app, so the control only appears on hardware that actually reports it.
+        // Quick Access. Two assignable function slots, QUICK_ACCESS1 and
+        // QUICK_ACCESS2 — actions, not left/right earcups. The XM6 has one ANC
+        // button, a power button and a touch panel; which physical control each
+        // slot maps to is not established, so they are labelled neutrally rather
+        // than claiming a mapping we cannot evidence.
+        //
+        // Hidden until the device answers: the model gate is negotiated at
+        // runtime and could not be confirmed for the XM6 from the app.
         val fns = quickAccessFunctions
         if (fns == null) {
             binding.quickAccessGroup.visibility = android.view.View.GONE

@@ -165,12 +165,12 @@
 
         <LinearLayout android:id="@+id/quickAccessGroup" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:visibility="gone">
 
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quick Access — headphone button" android:textSize="13sp" android:textColor="#FFFFFFFF" android:paddingTop="12dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quick Access — button function" android:textSize="13sp" android:textColor="#FFFFFFFF" android:paddingTop="12dp" />
 
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Left button" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="6dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quick Access 1" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="6dp" />
             <Spinner android:id="@+id/spinnerQaLeft" android:layout_width="match_parent" android:layout_height="wrap_content" />
 
-            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Right button" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="4dp" />
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Quick Access 2" android:textSize="11sp" android:textColor="#FFAAAAAA" android:paddingTop="4dp" />
             <Spinner android:id="@+id/spinnerQaRight" android:layout_width="match_parent" android:layout_height="wrap_content" />
 
             <TextView android:id="@+id/textUpscaling" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#FF7FD4A8" android:paddingTop="6dp" android:visibility="gone" />

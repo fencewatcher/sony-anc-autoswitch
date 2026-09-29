@@ -230,8 +230,13 @@ object SonyMdrV2 {
     // ---- Quick Access (T1, type 0x0D) ----
     //
     // Traced from the decompiled app. Layout is [F8, 0D, count, fn...] with an
-    // unsigned count and no key byte; the button is positional (index 0 = left,
-    // 1 = right) and the write is whole-array.
+    // unsigned count and no key byte; the write is whole-array.
+    //
+    // The two slots are QUICK_ACCESS1 and QUICK_ACCESS2 in AssignableSettingsFunction,
+    // which is a list of *actions* alongside VOLUME_UP, PLAY_PAUSE and
+    // QUICK_ATTENTION — not a left/right earcup pair. A prior trace labelled them
+    // L and R on no evidence; the XM6 has one ANC button, a power button and a
+    // touch panel, so that reading cannot be right.
     //
     // Caution: these are the values on the wire. The app also has a `Function`
     // enum in a different numeric space (sptf = 66, not 1) that nothing converts
