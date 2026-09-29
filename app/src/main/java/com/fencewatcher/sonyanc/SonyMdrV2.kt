@@ -192,6 +192,41 @@ object SonyMdrV2 {
     const val CMD_SYSTEM_NTFY_STATUS = 0xF5
     const val SYS_TYPE_HEAD_GESTURE_TRAINING = 0x10
 
+    // ---- Wear status (T2) — the authoritative source ----
+    //
+    // T2 carries its own SystemInquiredType enum, disjoint from T1's. WEARING_STATUS_
+    // CHECKER = 0x00 and the gesture-judgement type 0x08 exist only here, which is
+    // why every T1 wearing probe went unanswered all day.
+    const val CMD_SYSTEM_GET_STATUS_T2 = 0xF2
+    const val CMD_SYSTEM_RET_STATUS_T2 = 0xF3
+    const val T2_TYPE_WEARING_STATUS_CHECKER = 0x00
+
+    const val WEAR_NORMAL = 0x00
+    const val WEAR_ILLEGAL = 0x01
+    const val WEAR_LEFT_NOT_WORN = 0x02
+    const val WEAR_RIGHT_NOT_WORN = 0x03
+    const val WEAR_BOTH_NOT_WORN = 0x04
+
+    /** Ask for current wear state. Must be sent on the T2 table. */
+    fun buildWearingStatusGet(): ByteArray =
+        byteArrayOf(CMD_SYSTEM_GET_STATUS_T2.toByte(), T2_TYPE_WEARING_STATUS_CHECKER.toByte())
+
+    /**
+     * The XM6 reports all-or-nothing in practice — LEFT/RIGHT_NOT_WEAR never came
+     * back — so the per-ear codes are decoded for completeness but only NORMAL and
+     * BOTH_NOT_WORN are treated as a wear change.
+     */
+    fun wearStatusName(v: Int): String = when (v) {
+        WEAR_NORMAL -> "both worn"
+        WEAR_ILLEGAL -> "illegal"
+        WEAR_LEFT_NOT_WORN -> "left not worn"
+        WEAR_RIGHT_NOT_WORN -> "right not worn"
+        WEAR_BOTH_NOT_WORN -> "off head"
+        else -> "unknown ($v)"
+    }
+
+    fun isWorn(v: Int): Boolean = v == WEAR_NORMAL
+
     /** [buildAudioCodecGet] — the codec actually in use right now. */
     fun buildAudioCodecGet(): ByteArray =
         byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_AUDIO_CODEC.toByte())

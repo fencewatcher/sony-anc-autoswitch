@@ -482,6 +482,7 @@ class BluetoothAncService : Service() {
                             if (!isActive || btSocket == null) break
                             sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
                             sendFrame(SonyMdrV2.buildAudioCodecGet())
+                            sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
                             delay(500L)
                             runAutomation(currentPlaybackTrigger())
                         }
@@ -801,23 +802,19 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            // Wear event: [0xF5, 0x10, mode, enable]. EnableDisable is inverted
-            // in this protocol, so 0x00 = on head, 0x01 = off head.
+            // Wear status, T2: [0xF3, 0x00, WearingStatusCode]. The authority.
+            SonyMdrV2.CMD_SYSTEM_RET_STATUS_T2 -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.T2_TYPE_WEARING_STATUS_CHECKER) {
+                    applyWearCode(p[2].toInt() and 0xFF)
+                }
+            }
+
+            // T1 head-gesture notify. Not wear data — it flips in step with
+            // don/doff, so it is useful as an early "something changed" hint.
+            // Re-ask T2 rather than reading a value off it.
             SonyMdrV2.CMD_SYSTEM_NTFY_STATUS -> {
                 if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.SYS_TYPE_HEAD_GESTURE_TRAINING) {
-                    val enable = p[3].toInt() and 0xFF
-                    val worn = SonyMdrV2.decodeInvertedEnable(enable)
-                    if (worn != null && worn != headphonesWorn) {
-                        headphonesWorn = worn
-                        Log.d(tag, "Wear event: ${if (worn) "ON head" else "OFF head"}")
-                        broadcastStats()
-                        scope.launch {
-                            runAutomation(
-                                if (worn) Automation.Trigger.HEADPHONES_ON
-                                else Automation.Trigger.HEADPHONES_OFF
-                            )
-                        }
-                    }
+                    scope.launch { sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2) }
                 }
             }
 
@@ -866,6 +863,7 @@ class BluetoothAncService : Service() {
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
         sendFrame(SonyMdrV2.buildAudioCodecGet())
+        sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
         // Type 0x00 (ADAPTIVE_CONTROL) drew no reply at all on XM6, so try the
         // parameter-notification variant too. Whichever answers, if either, tells
         // us where wearing detection actually lives.
@@ -1447,13 +1445,34 @@ class BluetoothAncService : Service() {
         private set
 
     /**
-     * true = on head, false = off head, null = unknown until the first event.
-     *
-     * Derived from a push only. Polling the wearing detector returns a frame that
-     * does not vary across a don/doff, so this cannot be read on demand.
+     * Authoritative wear code from the T2 wearing-status checker, or null until
+     * the first reply. Every T1 wearing probe on this model returns nothing, so
+     * this is the only trustworthy source.
      */
+    var wearStatusCode: Int? = null
+        private set
+
+    /** true = on head, false = off head, null = unknown. Derived from [wearStatusCode]. */
     var headphonesWorn: Boolean? = null
         private set
+
+    private fun applyWearCode(code: Int) {
+        if (code == wearStatusCode) return
+        wearStatusCode = code
+        val worn = SonyMdrV2.isWorn(code)
+        val changed = worn != headphonesWorn
+        headphonesWorn = worn
+        Log.d(tag, "Wear status: ${SonyMdrV2.wearStatusName(code)}")
+        broadcastStats()
+        if (changed) {
+            scope.launch {
+                runAutomation(
+                    if (worn) Automation.Trigger.HEADPHONES_ON
+                    else Automation.Trigger.HEADPHONES_OFF
+                )
+            }
+        }
+    }
 
     /** Last raw SENSE frame seen, for the Home debug line. */
     var senseDebug: String = "no SENSE frame yet"
