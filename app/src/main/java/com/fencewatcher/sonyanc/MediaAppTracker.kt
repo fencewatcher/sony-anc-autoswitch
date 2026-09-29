@@ -47,6 +47,23 @@ object MediaAppTracker {
     @Volatile
     var refreshHook: (() -> Unit)? = null
 
+    /**
+     * Whether the system has actually granted this app notification-listener access.
+     *
+     * Read from `enabled_notification_listeners` rather than assumed, because the
+     * only symptom of missing access is that attribution silently resolves to
+     * "nothing playing" and the filter denies everything — which is invisible
+     * unless something surfaces it.
+     */
+    fun isNotificationAccessGranted(context: Context): Boolean {
+        val enabled = android.provider.Settings.Secure.getString(
+            context.contentResolver, "enabled_notification_listeners",
+        ) ?: return false
+        val expected = ComponentName(context, MediaNotificationListener::class.java)
+            .flattenToString()
+        return enabled.split(':').any { it == expected }
+    }
+
     /** Packages whose media session is currently in STATE_PLAYING. */
     @Volatile
     var playingPackages: Set<String> = emptySet()

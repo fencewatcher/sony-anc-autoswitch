@@ -236,7 +236,8 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoAmbient.setOnCheckedChangeListener { _, c -> saveSetting("auto_ambient", c) }
         binding.switchAllowlist.setOnCheckedChangeListener { _, c ->
             getSharedPreferences("anc_settings", MODE_PRIVATE).edit().putBoolean("allowlist_enabled", c).apply()
-            updateSelectedAppsText() }
+            updateSelectedAppsText()
+            updateAllowlistPermissionWarning() }
         binding.spinnerDevice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
@@ -711,8 +712,27 @@ class MainActivity : AppCompatActivity() {
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
         binding.switchAllowlist.isChecked = prefs.getBoolean("allowlist_enabled", false)
         updateSelectedAppsText()
+        updateAllowlistPermissionWarning()
         val name = pairedDevices.find { it.address == addr }?.name ?: ""
         binding.textProfile.text = "Protocol: ${HeadphoneProfile.detect(name).modelName}"
+    }
+
+    /**
+     * Make the filter's hard dependency visible.
+     *
+     * Without notification access the system never binds the listener, so
+     * `getActiveSessions()` is never called and the allowlist cannot attribute
+     * playback to any app — it denies every trigger. That used to be visible only
+     * in logcat, so the filter could look enabled while being incapable of
+     * working. Surface it in the UI instead.
+     */
+    private fun updateAllowlistPermissionWarning() {
+        val enabled = getSharedPreferences("anc_settings", MODE_PRIVATE)
+            .getBoolean("allowlist_enabled", false)
+        val hasAccess = androidx.core.app.NotificationManagerCompat
+            .getEnabledListenerPackages(this).contains(packageName)
+        val w = binding.textAllowlistPermissionWarning
+        w.visibility = if (enabled && !hasAccess) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     private fun saveSetting(key: String, value: Any) {
