@@ -409,6 +409,105 @@
                     android:paddingHorizontal="8dp"
                     android:backgroundTint="#FF774444"
                     android:layout_marginTop="4dp" />
+
+                <!-- ============ MULTIPOINT ============ -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="MULTIPOINT"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="20dp"
+                    android:paddingBottom="8dp" />
+
+                <LinearLayout
+                    android:id="@+id/multiPointList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/textMultiPointStatus"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textSize="12sp"
+                    android:textColor="#FFAAAAAA"
+                    android:paddingTop="6dp"
+                    android:text="Tap a device to switch audio source" />
+
+                <Button
+                    android:id="@+id/btnRefreshDevices"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:text="↻ Refresh devices"
+                    android:textColor="@android:color/white"
+                    android:paddingHorizontal="8dp"
+                    android:backgroundTint="#FF445577"
+                    android:layout_marginTop="6dp" />
+
+                <!-- ============ HEADPHONE FEATURES ============ -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="HEADPHONE FEATURES"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="20dp"
+                    android:paddingBottom="4dp" />
+
+                <Switch
+                    android:id="@+id/switchSpeakToChat"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Speak-to-chat"
+                    android:textColor="@color/on_surface" />
+
+                <Switch
+                    android:id="@+id/switchPauseOff"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Pause when taken off"
+                    android:textColor="@color/on_surface" />
+
+                <Switch
+                    android:id="@+id/switchDsee"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="DSEE Extreme"
+                    android:textColor="@color/on_surface" />
+
+                <Switch
+                    android:id="@+id/switchBgm"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Background music (BGM)"
+                    android:textColor="@color/on_surface" />
+
+                <Switch
+                    android:id="@+id/switchUpmix"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Upmix / Cinema"
+                    android:textColor="@color/on_surface" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="AUTO POWER OFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="16dp"
+                    android:paddingBottom="4dp" />
+
+                <Spinner
+                    android:id="@+id/spinnerAutoPower"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:background="@color/surface"
+                    android:textColor="@color/on_surface" />
             </LinearLayout>
 
             <!-- ============ EQ TAB ============ -->

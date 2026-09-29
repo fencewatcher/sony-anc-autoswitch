@@ -39,6 +39,25 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_EQ_CUST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_POWER_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_BANDS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PERIPHERAL_OK
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_LIST
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_MACS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_ACTIVE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SPEAK_TO_CHAT
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_OFF
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BGM
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_UPMIX
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_AUTO_POWER_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_TARGET_MAC
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_REFRESH_DEVICES
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SOURCE_SWITCH
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_SPEAK_TO_CHAT
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_PAUSE_TAKEN_OFF
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_DSEE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
 import java.util.Locale
 
@@ -62,6 +81,22 @@ class MainActivity : AppCompatActivity() {
     private var selectedEQProfile = 0xA0 // 0xA0=Custom, 0xA1=User1, 0xA2=User2
     private var eqActivePreset = 0
     private var eqActiveBands: IntArray? = null
+
+    // Headphone feature state (mirrored from the service broadcasts)
+    private var peripheralSupported = false
+    private var speakToChat = false
+    private var pauseWhenTakenOff = false
+    private var dseeExtreme = false
+    private var bgmMode = false
+    private var upmixCinema = false
+    private var autoPowerOffMode = 0
+    private var multiNames: Array<String> = emptyArray()
+    private var multiMacs: Array<String> = emptyArray()
+    private var multiActive: BooleanArray = BooleanArray(0)
+
+    /** Guards switch/spinner listeners while we push service state into the UI. */
+    private var updatingUi = false
+    private var autoPowerSpinnerReady = false
 
     private val requiredPermissions = mutableListOf<String>().apply {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -100,6 +135,24 @@ class MainActivity : AppCompatActivity() {
                     for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
                     binding.eqGraph.bandValues = eqBandValues
                 }
+            }
+
+            // Multipoint + headphone feature state
+            if (intent?.hasExtra(EXTRA_PERIPHERAL_OK) == true) {
+                peripheralSupported = intent.getBooleanExtra(EXTRA_PERIPHERAL_OK, false)
+                if (intent.hasExtra(EXTRA_DEVICE_MACS)) {
+                    multiNames = intent.getStringArrayExtra(EXTRA_DEVICE_LIST) ?: emptyArray()
+                    multiMacs = intent.getStringArrayExtra(EXTRA_DEVICE_MACS) ?: emptyArray()
+                    multiActive = intent.getBooleanArrayExtra(EXTRA_DEVICE_ACTIVE) ?: BooleanArray(0)
+                }
+                speakToChat = intent.getBooleanExtra(EXTRA_SPEAK_TO_CHAT, false)
+                pauseWhenTakenOff = intent.getBooleanExtra(EXTRA_PAUSE_TAKEN_OFF, false)
+                dseeExtreme = intent.getBooleanExtra(EXTRA_DSEE, false)
+                bgmMode = intent.getBooleanExtra(EXTRA_BGM, false)
+                upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
+                autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
+                renderMultiPoint()
+                renderFeatureSwitches()
             }
         }
     }
@@ -158,8 +211,52 @@ class MainActivity : AppCompatActivity() {
         binding.btnPowerOff.setOnClickListener {
             if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return@setOnClickListener }
             sendToService(ACTION_POWER_OFF) {}
-            Toast.makeText(this, "⏹ Power-off sent", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Powering off…", Toast.LENGTH_SHORT).show()
         }
+
+        // ---- Multipoint ----
+        binding.btnRefreshDevices.setOnClickListener {
+            if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+            binding.textMultiPointStatus.text = "Refreshing…"
+            sendToService(ACTION_REFRESH_DEVICES) {}
+        }
+
+        // ---- Headphone feature switches (Table 1 params) ----
+        binding.switchSpeakToChat.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            sendToService(ACTION_SET_SPEAK_TO_CHAT) { putExtra("on", c) }
+        }
+        binding.switchPauseOff.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            sendToService(ACTION_SET_PAUSE_TAKEN_OFF) { putExtra("on", c) }
+        }
+        binding.switchDsee.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            sendToService(ACTION_SET_DSEE) { putExtra("on", c) }
+        }
+        binding.switchBgm.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            sendToService(ACTION_SET_BGM) { putExtra("on", c) }
+        }
+        binding.switchUpmix.setOnCheckedChangeListener { _, c ->
+            if (updatingUi) return@setOnCheckedChangeListener
+            sendToService(ACTION_SET_UPMIX) { putExtra("on", c) }
+        }
+
+        // Auto power-off: XM6 firmware only accepts the two wearing-detection values.
+        val powerValues = intArrayOf(SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF, SonyMdrV2.AutoPowerOff.NEVER)
+        val powerLabels = powerValues.map { SonyMdrV2.AutoPowerOff.label(it) }.toTypedArray()
+        binding.spinnerAutoPower.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, powerLabels).also {
+            it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        binding.spinnerAutoPower.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (!autoPowerSpinnerReady || updatingUi) return
+                sendToService(ACTION_SET_AUTO_POWER) { putExtra("mode", powerValues[pos]) }
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        autoPowerSpinnerReady = true
 
         // EQ graph callbacks
         binding.eqGraph.onBandChanged = { index, value ->
@@ -198,6 +295,76 @@ class MainActivity : AppCompatActivity() {
             binding.eqGraph.bandValues = eqBandValues
             if (BluetoothAncService.isRunning) sendToService(ACTION_GET_STATUS) {}
         }
+    }
+
+    // ---- Multipoint + feature state rendering ----
+
+    private fun toast(msg: String) = Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+
+    private fun renderMultiPoint() {
+        val box = binding.multiPointList
+        box.removeAllViews()
+        if (multiMacs.isEmpty()) {
+            binding.textMultiPointStatus.text = if (peripheralSupported)
+                "No paired devices reported (enable multipoint in the Sony app)"
+            else "Peripheral/multipoint family not supported on this device"
+            return
+        }
+        for (i in multiMacs.indices) {
+            val name = multiNames.getOrElse(i) { multiMacs[i] }
+            val isActive = multiActive.getOrElse(i) { false }
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                setPadding(0, 10, 0, 10)
+                isClickable = true
+                if (isActive) {
+                    setBackgroundColor(0x2233AA88)
+                    isEnabled = false
+                }
+            }
+            val label = android.widget.TextView(this).apply {
+                text = (if (isActive) "▶ " else "") + name
+                textSize = 14f
+                setTextColor(if (isActive) Color.rgb(120, 230, 180) else Color.rgb(210, 210, 210))
+            }
+            val macLabel = android.widget.TextView(this).apply {
+                text = multiMacs[i]
+                textSize = 11f
+                setTextColor(Color.rgb(130, 130, 130))
+                gravity = android.view.Gravity.END
+            }
+            row.addView(label, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            row.addView(macLabel)
+            if (!isActive) {
+                row.setOnClickListener {
+                    if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+                    sendToService(ACTION_SOURCE_SWITCH) { putExtra(EXTRA_TARGET_MAC, multiMacs[i]) }
+                    binding.textMultiPointStatus.text = "Switching to $name…"
+                }
+            }
+            box.addView(row)
+        }
+        val activeName = multiMacs.indices.firstOrNull { multiActive.getOrElse(it) { false } }
+            ?.let { multiNames.getOrNull(it) }
+        binding.textMultiPointStatus.text = if (activeName != null)
+            "Playing from: $activeName — tap another to switch"
+        else "Tap a device to switch audio source"
+    }
+
+    private fun renderFeatureSwitches() {
+        updatingUi = true
+        binding.switchSpeakToChat.isChecked = speakToChat
+        binding.switchPauseOff.isChecked = pauseWhenTakenOff
+        binding.switchDsee.isChecked = dseeExtreme
+        binding.switchBgm.isChecked = bgmMode
+        binding.switchUpmix.isChecked = upmixCinema
+        if (autoPowerOffMode != 0) {
+            val idx = listOf(SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF, SonyMdrV2.AutoPowerOff.NEVER)
+                .indexOf(autoPowerOffMode)
+            if (idx >= 0) binding.spinnerAutoPower.setSelection(idx)
+        }
+        updatingUi = false
     }
 
     // ---- EQ ----

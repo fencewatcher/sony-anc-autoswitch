@@ -121,8 +121,54 @@ class BluetoothAncService : Service() {
                 ACTION_POWER_OFF -> {
                     Log.d(tag, "Power-off command")
                     scope.launch {
-                        sendFrame(SonyAncProtocol.buildPowerOff())
+                        sendFrame(SonyMdrV2.buildPowerOff())
                     }
+                }
+
+                ACTION_REFRESH_DEVICES -> {
+                    Log.d(tag, "Refreshing multipoint device list (T2)")
+                    scope.launch { refreshMultipoint() }
+                }
+
+                ACTION_SOURCE_SWITCH -> {
+                    val mac = intent.getStringExtra(EXTRA_TARGET_MAC)
+                    val payload = mac?.let { SonyMdrV2.buildSourceSwitchSet(it) }
+                    if (payload == null) {
+                        Log.e(tag, "Bad source-switch MAC: $mac")
+                    } else {
+                        Log.d(tag, "Source switch → $mac (T2)")
+                        scope.launch { sendFrame(payload, SonyMdrV2.Table.T2) }
+                    }
+                }
+
+                ACTION_SET_SPEAK_TO_CHAT -> {
+                    val on = intent.getBooleanExtra("on", true)
+                    scope.launch { sendFrame(SonyMdrV2.buildSpeakToChatSet(on)) }
+                }
+
+                ACTION_SET_PAUSE_TAKEN_OFF -> {
+                    val on = intent.getBooleanExtra("on", true)
+                    scope.launch { sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(on)) }
+                }
+
+                ACTION_SET_DSEE -> {
+                    val on = intent.getBooleanExtra("on", true)
+                    scope.launch { sendFrame(SonyMdrV2.buildUpscalingSet(on)) }
+                }
+
+                ACTION_SET_BGM -> {
+                    val on = intent.getBooleanExtra("on", true)
+                    scope.launch { sendFrame(SonyMdrV2.buildBgmSet(on)) }
+                }
+
+                ACTION_SET_UPMIX -> {
+                    val on = intent.getBooleanExtra("on", true)
+                    scope.launch { sendFrame(SonyMdrV2.buildUpmixSet(on)) }
+                }
+
+                ACTION_SET_AUTO_POWER -> {
+                    val mode = intent.getIntExtra("mode", 0x11)
+                    scope.launch { sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode)) }
                 }
             }
         } catch (e: Exception) {
@@ -296,6 +342,12 @@ class BluetoothAncService : Service() {
                     sendFrame(byteArrayOf(0x56, 0x00))
                     delay(200L)
 
+                    // Probe every feature we can display, on both command tables.
+                    // The peripheral/multipoint family only answers on table 2.
+                    Log.d(tag, "Querying full device state (T1 + T2)")
+                    queryAllState()
+                    delay(200L)
+
                     Log.d(tag, "Handshake complete — sending active ANC command")
                     sendCommandForPlaybackState()
 
@@ -327,6 +379,7 @@ class BluetoothAncService : Service() {
                                     if (frame.dataType != 0x01) {
                                         val ackSeq = (frame.sequence xor 1) and 0xFF
                                         sendAck(ackSeq)
+                                        Log.d(tag, "← [${if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(frame.payload)}")
                                         parseIncoming(frame)
                                     }
                                 }
@@ -419,25 +472,129 @@ class BluetoothAncService : Service() {
                 refreshNotification()
             }
 
-            0x37, 0x39 -> {  // PERIPHERAL RET / NTFY — multipoint device list
+            // ---- Table 2 (peripheral / multipoint) ----
+            SonyMdrV2.CMD_PERI_RET_CAPABILITY -> {
+                peripheralSupported = true
+                Log.d(tag, "Peripheral family present (multipoint available)")
+                broadcastStats()
+            }
+
+            SonyMdrV2.CMD_PERI_RET_PARAM, SonyMdrV2.CMD_PERI_NTFY_PARAM -> {
                 val subtype = p[1].toInt() and 0xFF
-                if (subtype == 0x02 || subtype == 0x00) {
-                    val devices = SonyAncProtocol.decodeDeviceList(p)
-                    if (devices != null) {
-                        Log.d(tag, "Multipoint devices: ${devices.size} entries")
-                        connectedDevices = devices
-                        broadcastStats()
+                when (subtype) {
+                    SonyMdrV2.PERI_TYPE_DEVICE_MANAGEMENT,
+                    SonyMdrV2.PERI_TYPE_DEVICE_MANAGEMENT_COD -> {
+                        val devices = SonyMdrV2.decodeDeviceList(p)
+                        if (devices != null) {
+                            peripheralSupported = true
+                            connectedDevices = devices
+                            Log.d(tag, "Multipoint list (${devices.size}): " +
+                                devices.joinToString { "${it.name}${if (it.isActive) "*" else ""}/${it.mac}" })
+                            refreshNotification()
+                        }
+                    }
+                    SonyMdrV2.PERI_TYPE_MUSIC_HAND_OVER -> {
+                        if (p.size >= 3) {
+                            musicHandOver = p[2].toInt() and 0xFF != 0
+                            broadcastStats()
+                        }
                     }
                 }
             }
 
-            0x27, 0x29 -> {  // Auto-power-off RET / NTFY
-                val mode = SonyAncProtocol.decodeAutoPowerOff(p)
-                if (mode != null) {
-                    autoPowerOffMode = mode
+            SonyMdrV2.CMD_PERI_NTFY_EXT_PARAM -> {
+                val res = SonyMdrV2.decodeSourceSwitchResult(p)
+                if (res != null) {
+                    val ok = res.first == SonyMdrV2.SOURCE_SWITCH_SUCCESS
+                    Log.d(tag, "Source switch ${if (ok) "OK" else "FAILED(0x%02x)".format(res.first)} → ${res.second}")
+                    if (ok) scope.launch { refreshMultipoint() }
+                    broadcastStats()
                 }
             }
+
+            // ---- Power params (both tables) ----
+            SonyMdrV2.CMD_POWER_RET_PARAM, SonyMdrV2.CMD_POWER_NTFY_PARAM -> {
+                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.POWER_TYPE_AUTO_POWER_OFF_WEARING) {
+                    autoPowerOffMode = p[2].toInt() and 0xFF
+                    Log.d(tag, "Auto power-off: ${SonyMdrV2.AutoPowerOff.label(autoPowerOffMode)}")
+                    broadcastStats()
+                }
+            }
+
+            // ---- System params: speak-to-chat / pause-when-taken-off ----
+            SonyMdrV2.CMD_SYSTEM_RET_PARAM, SonyMdrV2.CMD_SYSTEM_NTFY_PARAM -> {
+                val subtype = p[1].toInt() and 0xFF
+                val flag = SonyMdrV2.decodeInvertedFlag(p, subtype)
+                when (subtype) {
+                    SonyMdrV2.SYS_TYPE_SMART_TALKING -> if (flag != null) {
+                        speakToChat = flag
+                        Log.d(tag, "Speak-to-chat: $speakToChat")
+                    }
+                    SonyMdrV2.SYS_TYPE_PLAYBACK_CONTROL_BY_WEARING -> if (flag != null) {
+                        pauseWhenTakenOff = flag
+                        Log.d(tag, "Pause when taken off: $pauseWhenTakenOff")
+                    }
+                }
+                broadcastStats()
+            }
+
+            SonyMdrV2.CMD_SYSTEM_RET_EXT_PARAM, SonyMdrV2.CMD_SYSTEM_NTFY_EXT_PARAM -> {
+                if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.SYS_TYPE_SMART_TALKING) {
+                    stcSensitivity = p[2].toInt() and 0xFF
+                    stcTimeout = p[3].toInt() and 0xFF
+                    Log.d(tag, "Speak-to-chat config: sens=$stcSensitivity timeout=$stcTimeout")
+                    broadcastStats()
+                }
+            }
+
+            // ---- Audio params: DSEE / BGM / upmix ----
+            SonyMdrV2.CMD_AUDIO_RET_PARAM, SonyMdrV2.CMD_AUDIO_NTFY_PARAM -> {
+                val subtype = p[1].toInt() and 0xFF
+                val flag = SonyMdrV2.decodeInvertedFlag(p, subtype)
+                when (subtype) {
+                    SonyMdrV2.AUDIO_TYPE_UPSCALING -> if (flag != null) {
+                        dseeExtreme = flag
+                        Log.d(tag, "DSEE Extreme: $dseeExtreme")
+                    }
+                    SonyMdrV2.AUDIO_TYPE_UPMIX_CINEMA -> if (flag != null) {
+                        upmixCinema = flag
+                        Log.d(tag, "Upmix/Cinema: $upmixCinema")
+                    }
+                    SonyMdrV2.AUDIO_TYPE_BGM_AND_ERRORCODE,
+                    SonyMdrV2.AUDIO_TYPE_BGM_MODE -> if (flag != null) {
+                        bgmMode = flag
+                        Log.d(tag, "BGM mode: $bgmMode")
+                    }
+                }
+                broadcastStats()
+            }
         }
+    }
+
+    /** Query everything we can display, on both command tables. */
+    private suspend fun queryAllState() {
+        // Table 1 — main features
+        sendFrame(byteArrayOf(SonyMdrV2.CMD_NCASM_GET_PARAM.toByte(), SonyMdrV2.NCASM_SUBTYPE_STANDARD.toByte()))
+        sendFrame(SonyMdrV2.buildAutoPowerOffGet())
+        sendFrame(SonyMdrV2.buildSpeakToChatGet())
+        sendFrame(SonyMdrV2.buildPauseWhenTakenOffGet())
+        sendFrame(SonyMdrV2.buildSpeakToChatConfigGet())
+        sendFrame(SonyMdrV2.buildUpscalingGet())
+        sendFrame(SonyMdrV2.buildBgmGet())
+        sendFrame(SonyMdrV2.buildUpmixGet())
+        sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+        delay(120)
+        // Table 2 — peripheral / multipoint
+        sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
+        delay(120)
+        sendFrame(SonyMdrV2.buildMusicHandOverGet(), SonyMdrV2.Table.T2)
+    }
+
+    /** Re-read the multipoint list (used after a successful source switch). */
+    private suspend fun refreshMultipoint() {
+        sendFrame(SonyMdrV2.buildDeviceListGet(), SonyMdrV2.Table.T2)
     }
 
     // ---- Bluetooth connection helpers ----
@@ -525,17 +682,17 @@ class BluetoothAncService : Service() {
      * Send arbitrary payload bytes wrapped in an MDR frame, used for
      * protocol handshake commands.
      */
-    private fun sendFrame(payload: ByteArray, type: Int = 0x0C) {
+    private fun sendFrame(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
         val socket = btSocket ?: return
         try {
-            val frame = SonyAncProtocol.buildFrame(currentSeq, payload, type)
+            val frame = SonyMdrV2.buildFrame(currentSeq, payload, table)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
-            Log.d(tag, "Frame ${payload.joinToString(" ") { "%02x".format(it) }} seq=$currentSeq")
+            Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$currentSeq")
             currentSeq = currentSeq xor 1
 
             // Track the mode we last commanded (for notification stats)
-            if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == 0x68) {
+            if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == SonyMdrV2.CMD_NCASM_SET_PARAM) {
                 currentModeName = profile.describe(payload)
             }
         } catch (e: Exception) {
@@ -780,7 +937,27 @@ class BluetoothAncService : Service() {
     // Multipoint device list from PERIPHERAL NTFY
     var connectedDevices: List<MultipointDevice> = emptyList()
         private set
+    var peripheralSupported: Boolean = false
+        private set
+    var musicHandOver: Boolean = false
+        private set
+
+    // Headphone-side feature state (read back from the device, not just what we sent)
     var autoPowerOffMode: Int = 0
+        private set
+    var speakToChat: Boolean = false
+        private set
+    var stcSensitivity: Int = 0
+        private set
+    var stcTimeout: Int = 0
+        private set
+    var pauseWhenTakenOff: Boolean = false
+        private set
+    var dseeExtreme: Boolean = false
+        private set
+    var bgmMode: Boolean = false
+        private set
+    var upmixCinema: Boolean = false
         private set
 
     private fun broadcastStatus(s: Status, message: String? = null) {
@@ -807,9 +984,19 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
             eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
             if (connectedDevices.isNotEmpty()) {
-                putExtra(EXTRA_DEVICE_LIST, connectedDevices.filter { it.connectedStatus > 0 }.map { it.name }.toTypedArray())
+                putExtra(EXTRA_DEVICE_LIST, connectedDevices.map { it.name }.toTypedArray())
+                putExtra(EXTRA_DEVICE_MACS, connectedDevices.map { it.mac }.toTypedArray())
+                putExtra(EXTRA_DEVICE_ACTIVE, connectedDevices.map { it.isActive }.toBooleanArray())
             }
-            if (autoPowerOffMode != 0) putExtra(EXTRA_AUTO_POWER_MODE, autoPowerOffMode)
+            putExtra(EXTRA_PERIPHERAL_OK, peripheralSupported)
+            putExtra(EXTRA_AUTO_POWER_MODE, autoPowerOffMode)
+            putExtra(EXTRA_SPEAK_TO_CHAT, speakToChat)
+            putExtra(EXTRA_STC_SENS, stcSensitivity)
+            putExtra(EXTRA_STC_TIMEOUT, stcTimeout)
+            putExtra(EXTRA_PAUSE_TAKEN_OFF, pauseWhenTakenOff)
+            putExtra(EXTRA_DSEE, dseeExtreme)
+            putExtra(EXTRA_BGM, bgmMode)
+            putExtra(EXTRA_UPMIX, upmixCinema)
             `package` = packageName
         }
         try { sendBroadcast(intent) } catch (_: Exception) {}
@@ -839,6 +1026,24 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_EQ = "$PACKAGE.action.SET_EQ"
         const val ACTION_SET_EQ_CUSTOM = "$PACKAGE.action.SET_EQ_CUSTOM"
         const val ACTION_POWER_OFF = "$PACKAGE.action.POWER_OFF"
+        const val ACTION_REFRESH_DEVICES = "$PACKAGE.action.REFRESH_DEVICES"
+        const val ACTION_SOURCE_SWITCH = "$PACKAGE.action.SOURCE_SWITCH"
+        const val ACTION_SET_SPEAK_TO_CHAT = "$PACKAGE.action.SET_SPEAK_TO_CHAT"
+        const val ACTION_SET_PAUSE_TAKEN_OFF = "$PACKAGE.action.SET_PAUSE_TAKEN_OFF"
+        const val ACTION_SET_DSEE = "$PACKAGE.action.SET_DSEE"
+        const val ACTION_SET_BGM = "$PACKAGE.action.SET_BGM"
+        const val ACTION_SET_UPMIX = "$PACKAGE.action.SET_UPMIX"
+        const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
+
+        const val EXTRA_TARGET_MAC = "target_mac"
+        const val EXTRA_PERIPHERAL_OK = "peripheral_ok"
+        const val EXTRA_SPEAK_TO_CHAT = "speak_to_chat"
+        const val EXTRA_STC_SENS = "stc_sens"
+        const val EXTRA_STC_TIMEOUT = "stc_timeout"
+        const val EXTRA_PAUSE_TAKEN_OFF = "pause_taken_off"
+        const val EXTRA_DSEE = "dsee"
+        const val EXTRA_BGM = "bgm"
+        const val EXTRA_UPMIX = "upmix"
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
@@ -850,6 +1055,8 @@ class BluetoothAncService : Service() {
         const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
         const val EXTRA_EQ_ACTIVE_BANDS = "eq_active_bands"
         const val EXTRA_DEVICE_LIST = "device_list"
+        const val EXTRA_DEVICE_MACS = "device_macs"
+        const val EXTRA_DEVICE_ACTIVE = "device_active"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast
