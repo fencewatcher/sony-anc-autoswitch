@@ -4,13 +4,20 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.3](https://img.shields.io/badge/version-1.3-blue)
+![v1.6](https://img.shields.io/badge/version-1.6-blue)
 
 ---
 
 ## Features
 
 - **🎵 Auto ANC** — Switches NC/Ambient/Off based on media playback (Spotify, YouTube Music, Podcast Addict, etc.)
+- **⚙️ Customisable automations** — Decide what happens on playback start/stop and connect/disconnect.
+  Triggers: playback starts, playback stops, headphones connect, headphones disconnect. Actions: do
+  nothing, set noise control, set ambient level, set volume, set EQ preset. Rules evaluate in order and
+  the first match wins — the default play → NC / stop → ambient behaviour is just an editable starting point.
+- **📱 Multipoint control** — See paired devices, which is the active audio source, and tap to switch
+- **🔊 Media volume + voice guidance volume** — read back and set through the device
+- **⏻ Power off** — Shut the headphones down from the app
 - **🎛️ Visual EQ** — Drag the frequency response curve (10 bands, 31Hz–16kHz, -6..+6 dB)
   - 8 presets: Off, Heavy, Clear, Hard, Soft, Custom, User 1, User 2
   - Write custom bands to Custom, User 1, or User 2 slots
