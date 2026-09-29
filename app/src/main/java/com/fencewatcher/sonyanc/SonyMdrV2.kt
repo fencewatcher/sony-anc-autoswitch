@@ -164,8 +164,16 @@ object SonyMdrV2 {
     fun inverted(on: Boolean) = if (on) 0x00 else 0x01
 
     fun buildUpscalingGet(): ByteArray = byteArrayOf(CMD_AUDIO_GET_PARAM.toByte(), AUDIO_TYPE_UPSCALING.toByte())
+
+    /**
+     * DSEE Extreme enable byte is **not** inverted — 0x01 means on.
+     *
+     * The upside/downmix and ambient/speak-to-chat params really are inverted, so
+     * this one is a genuine exception; treating it like the others made the toggle
+     * display the opposite of the real state.
+     */
     fun buildUpscalingSet(on: Boolean): ByteArray = byteArrayOf(
-        CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_UPSCALING.toByte(), inverted(on).toByte(),
+        CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_UPSCALING.toByte(), if (on) 0x01 else 0x00,
     )
 
     fun buildBgmGet(): ByteArray = byteArrayOf(CMD_AUDIO_GET_PARAM.toByte(), AUDIO_TYPE_BGM_AND_ERRORCODE.toByte())
@@ -334,6 +342,17 @@ object SonyMdrV2 {
         }
     }
 
+    /** For params whose enable byte is plain: 0x01 = on. See [buildUpscalingSet]. */
+    fun decodePlainFlag(p: ByteArray, subtype: Int, valueIndex: Int = 2): Boolean? {
+        if (p.size <= valueIndex) return null
+        if ((p[1].toInt() and 0xFF) != subtype) return null
+        return when (p[valueIndex].toInt() and 0xFF) {
+            0x01 -> true
+            0x00 -> false
+            else -> null
+        }
+    }
+
     // ---- Play family (T1, 0xA0..0xA9) — media volume ----
 
     const val CMD_PLAY_GET_STATUS = 0xA2
@@ -368,10 +387,19 @@ object SonyMdrV2 {
     const val VOICE_TYPE_ON_OFF = 0x03
     const val VOICE_TYPE_VOLUME = 0x20
 
+    /**
+     * The XM6 only implements the 5-step variant. Driving the generic [VOICE_TYPE_VOLUME]
+     * on hardware that expects this one gets values above 5 silently rejected, and the
+     * slider springs back to the old value.
+     */
+    const val VOICE_TYPE_VOLUME_5_STEPS = 0x21
+    const val VOICE_GUIDANCE_MAX = 5
+
     fun buildVoiceGuidanceVolumeGet(): ByteArray =
-        byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte())
+        byteArrayOf(CMD_VOICE_GUIDANCE_GET_PARAM.toByte(), VOICE_TYPE_VOLUME_5_STEPS.toByte())
     fun buildVoiceGuidanceVolumeSet(volume: Int): ByteArray = byteArrayOf(
-        CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME.toByte(), volume.coerceIn(0, 15).toByte(), 0x00,
+        CMD_VOICE_GUIDANCE_SET_PARAM.toByte(), VOICE_TYPE_VOLUME_5_STEPS.toByte(),
+        volume.coerceIn(0, VOICE_GUIDANCE_MAX).toByte(), 0x00,
     )
 
     // ---- Assignable button / sensor + call capture (T1 SYSTEM) ----

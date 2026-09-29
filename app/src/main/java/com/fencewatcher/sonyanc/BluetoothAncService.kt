@@ -186,15 +186,6 @@ class BluetoothAncService : Service() {
                     scope.launch { sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode)) }
                 }
 
-                ACTION_SET_VOLUME -> {
-                    val v = intent.getIntExtra("value", 10)
-                    scope.launch {
-                        sendFrame(SonyMdrV2.buildMusicVolumeSet(v))
-                        delay(120L)
-                        sendFrame(SonyMdrV2.buildMusicVolumeGet())
-                    }
-                }
-
                 ACTION_SET_VOICE_GUIDANCE -> {
                     val v = intent.getIntExtra("value", 5)
                     scope.launch {
@@ -596,15 +587,6 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            // ---- Play family: media volume (T1) ----
-            SonyMdrV2.CMD_PLAY_RET_STATUS, SonyMdrV2.CMD_PLAY_NTFY_STATUS -> {
-                if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.PLAY_TYPE_MUSIC_VOLUME) {
-                    mediaVolume = p[2].toInt() and 0xFF
-                    Log.d(tag, "Media volume: $mediaVolume")
-                    broadcastStats()
-                }
-            }
-
             // ---- Voice guidance (T2 only) ----
             SonyMdrV2.CMD_VOICE_GUIDANCE_RET_PARAM -> {
                 if (p.size >= 3 && (p[1].toInt() and 0xFF) == SonyMdrV2.VOICE_TYPE_VOLUME) {
@@ -619,9 +601,12 @@ class BluetoothAncService : Service() {
                 val subtype = p[1].toInt() and 0xFF
                 val flag = SonyMdrV2.decodeInvertedFlag(p, subtype)
                 when (subtype) {
-                    SonyMdrV2.AUDIO_TYPE_UPSCALING -> if (flag != null) {
-                        dseeExtreme = flag
-                        Log.d(tag, "DSEE Extreme: $dseeExtreme")
+                    SonyMdrV2.AUDIO_TYPE_UPSCALING -> {
+                        val plain = SonyMdrV2.decodePlainFlag(p, subtype)
+                        if (plain != null) {
+                            dseeExtreme = plain
+                            Log.d(tag, "DSEE Extreme: $plain")
+                        }
                     }
                     SonyMdrV2.AUDIO_TYPE_UPMIX_CINEMA -> if (flag != null) {
                         upmixCinema = flag
@@ -650,8 +635,6 @@ class BluetoothAncService : Service() {
         sendFrame(SonyMdrV2.buildBgmGet())
         sendFrame(SonyMdrV2.buildUpmixGet())
         sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
-        sendFrame(SonyMdrV2.buildMusicVolumeGet())
-        delay(120)
         // Table 2 — peripheral / multipoint
         sendFrame(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
         delay(120)
@@ -756,9 +739,9 @@ class BluetoothAncService : Service() {
             }
             Automation.ActionType.SET_AMBIENT_LEVEL -> sendFrame(profile.ancOn(rule.action.value))
             Automation.ActionType.SET_VOLUME -> {
-                sendFrame(SonyMdrV2.buildMusicVolumeSet(rule.action.value))
-                delay(120L)
-                sendFrame(SonyMdrV2.buildMusicVolumeGet())
+                // Media volume had no working path on this hardware and was judged
+                // useless, so it was removed rather than left half-wired.
+                Log.d(tag, "Automation: SET_VOLUME no longer supported — ignoring")
             }
             Automation.ActionType.SET_EQ_PRESET -> {
                 sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), rule.action.presetId.toByte(), 0x00))
@@ -1068,8 +1051,6 @@ class BluetoothAncService : Service() {
         private set
     var upmixCinema: Boolean = false
         private set
-    var mediaVolume: Int = -1
-        private set
     var voiceGuidanceVolume: Int = -1
         private set
 
@@ -1110,7 +1091,6 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DSEE, dseeExtreme)
             putExtra(EXTRA_BGM, bgmMode)
             putExtra(EXTRA_UPMIX, upmixCinema)
-            putExtra(EXTRA_MEDIA_VOLUME, mediaVolume)
             putExtra(EXTRA_VOICE_GUIDANCE_VOLUME, voiceGuidanceVolume)
             `package` = packageName
         }
@@ -1149,11 +1129,9 @@ class BluetoothAncService : Service() {
         const val ACTION_SET_BGM = "$PACKAGE.action.SET_BGM"
         const val ACTION_SET_UPMIX = "$PACKAGE.action.SET_UPMIX"
         const val ACTION_SET_AUTO_POWER = "$PACKAGE.action.SET_AUTO_POWER"
-        const val ACTION_SET_VOLUME = "$PACKAGE.action.SET_VOLUME"
         const val ACTION_SET_VOICE_GUIDANCE = "$PACKAGE.action.SET_VOICE_GUIDANCE"
         const val ACTION_RELOAD_AUTOMATION = "$PACKAGE.action.RELOAD_AUTOMATION"
 
-        const val EXTRA_MEDIA_VOLUME = "media_volume"
         const val EXTRA_VOICE_GUIDANCE_VOLUME = "voice_guidance_volume"
 
         const val EXTRA_TARGET_MAC = "target_mac"

@@ -58,10 +58,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_DSEE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_BGM
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_UPMIX
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_AUTO_POWER
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOLUME
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_SET_VOICE_GUIDANCE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RELOAD_AUTOMATION
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MEDIA_VOLUME
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_VOICE_GUIDANCE_VOLUME
 import com.fencewatcher.sonyanc.databinding.ActivityMainBinding
 import java.util.Locale
@@ -156,13 +154,7 @@ class MainActivity : AppCompatActivity() {
                 bgmMode = intent.getBooleanExtra(EXTRA_BGM, false)
                 upmixCinema = intent.getBooleanExtra(EXTRA_UPMIX, false)
                 autoPowerOffMode = intent.getIntExtra(EXTRA_AUTO_POWER_MODE, 0)
-                val vol = intent.getIntExtra(EXTRA_MEDIA_VOLUME, -1)
                 val vg = intent.getIntExtra(EXTRA_VOICE_GUIDANCE_VOLUME, -1)
-                if (vol >= 0) {
-                    updatingUi = true
-                    binding.seekMediaVolume.progress = vol
-                    updatingUi = false
-                }
                 if (vg >= 0) {
                     updatingUi = true
                     binding.seekVoiceGuidance.progress = vg
@@ -285,14 +277,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ---- Volume (read back from the headphones, set through the PLAY family) ----
-        binding.seekMediaVolume.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
-                if (!fromUser || updatingUi) return
-                sendToService(ACTION_SET_VOLUME) { putExtra("value", p) }
-            }
-            override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
-            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
-        })
         binding.seekVoiceGuidance.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
                 if (!fromUser || updatingUi) return
@@ -414,7 +398,6 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.NONE,
             Automation.ActionType.SET_MODE,
             Automation.ActionType.SET_AMBIENT_LEVEL,
-            Automation.ActionType.SET_VOLUME,
             Automation.ActionType.SET_EQ_PRESET,
         )
         val base = existingIndex?.let { automationRules[it] }
@@ -578,6 +561,23 @@ class MainActivity : AppCompatActivity() {
             if (idx >= 0) binding.spinnerAutoPower.setSelection(idx)
         }
         updatingUi = false
+        renderFeatureStatus()
+    }
+
+    /** Compact "what is switched on right now" line under the headphone card. */
+    private fun renderFeatureStatus() {
+        val on = buildList {
+            if (dseeExtreme) add("DSEE")
+            if (bgmMode) add("BGM")
+            if (upmixCinema) add("Upmix")
+            if (speakToChat) add("Speak-to-chat")
+        }
+        if (on.isEmpty()) {
+            binding.textFeatureStatus.visibility = android.view.View.GONE
+        } else {
+            binding.textFeatureStatus.visibility = android.view.View.VISIBLE
+            binding.textFeatureStatus.text = "On: " + on.joinToString(" · ")
+        }
     }
 
     // ---- EQ ----
@@ -685,10 +685,15 @@ class MainActivity : AppCompatActivity() {
     private fun updateSelectedAppsText() {
         val prefs = getSharedPreferences("anc_settings", MODE_PRIVATE)
         val s = prefs.getStringSet("allowlist_apps", emptySet()) ?: emptySet()
+        // Show friendly names, not com.spotify.music
+        val labels = s.map { pkg ->
+            runCatching { packageManager.getApplicationLabel(packageManager.getApplicationInfo(pkg, 0)).toString() }
+                .getOrDefault(pkg)
+        }.sorted()
         binding.textSelectedApps.text = when {
             !prefs.getBoolean("allowlist_enabled", false) -> "App filtering disabled"
             s.isEmpty() -> "No apps — nothing triggers"
-            else -> s.joinToString("\n")
+            else -> labels.joinToString("\n")
         }
     }
 

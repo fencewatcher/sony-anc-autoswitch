@@ -158,33 +158,42 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:orientation="horizontal"
-                                android:paddingTop="6dp"
+                                android:paddingTop="8dp"
                                 android:gravity="center_vertical">
 
                                 <TextView
                                     android:id="@+id/textBattery"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:textSize="14sp"
-                                    android:textColor="#FFAAAAAA"
+                                    android:textSize="13sp"
+                                    android:textColor="#FFCCCCCC"
+                                    android:background="@drawable/bg_chip"
+                                    android:paddingHorizontal="10dp"
+                                    android:paddingVertical="4dp"
                                     android:text="🔋 —" />
 
                                 <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:textSize="14sp"
-                                    android:textColor="#FF666666"
-                                    android:text=" | "
-                                    android:paddingHorizontal="8dp" />
-
-                                <TextView
                                     android:id="@+id/textMode"
-                                    android:layout_width="wrap_content"
+                                    android:layout_width="0dp"
+                                    android:layout_weight="1"
                                     android:layout_height="wrap_content"
-                                    android:textSize="14sp"
-                                    android:textColor="#FFAAAAAA"
+                                    android:textSize="13sp"
+                                    android:textColor="#FF7FD4A8"
+                                    android:background="@drawable/bg_chip"
+                                    android:paddingHorizontal="10dp"
+                                    android:paddingVertical="4dp"
+                                    android:layout_marginStart="8dp"
                                     android:text="🎧 —" />
                             </LinearLayout>
+
+                            <TextView
+                                android:id="@+id/textFeatureStatus"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:textSize="12sp"
+                                android:textColor="#FF7FD4A8"
+                                android:paddingTop="8dp"
+                                android:visibility="gone" />
                         </LinearLayout>
                     </LinearLayout>
                 </com.google.android.material.card.MaterialCardView>
@@ -565,32 +574,30 @@
                     android:paddingTop="20dp"
                     android:paddingBottom="4dp" />
 
+                <!-- ============ VOICE GUIDANCE ============ -->
                 <TextView
-                    android:layout_width="match_parent"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Media volume"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface" />
-
-                <SeekBar
-                    android:id="@+id/seekMediaVolume"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:max="20" />
+                    android:text="VOICE GUIDANCE"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:textColor="#FF888888"
+                    android:paddingTop="20dp"
+                    android:paddingBottom="4dp" />
 
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:text="Voice guidance volume"
-                    android:textSize="14sp"
-                    android:textColor="@color/on_surface"
-                    android:paddingTop="8dp" />
+                    android:text="Spoken prompts (“battery low”, connection messages)"
+                    android:textSize="12sp"
+                    android:textColor="#FFAAAAAA"
+                    android:paddingBottom="4dp" />
 
                 <SeekBar
                     android:id="@+id/seekVoiceGuidance"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:max="15" />
+                    android:max="5" />
             </LinearLayout>
 
             <!-- ============ EQ TAB ============ -->
