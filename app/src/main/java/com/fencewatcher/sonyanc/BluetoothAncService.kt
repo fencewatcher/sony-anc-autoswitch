@@ -54,6 +54,10 @@ class BluetoothAncService : Service() {
     private var autoPaused = false
     private var profile: HeadphoneProfile = HeadphoneProfile.Xm6
 
+    /** "auto" | "xm5" | "xm6" — user-pinned protocol, see EXTRA_PROFILE_OVERRIDE. */
+    @Volatile
+    private var profileOverride: String = "auto"
+
     // ---- Lifecycle ----
 
     override fun onCreate() {
@@ -75,6 +79,7 @@ class BluetoothAncService : Service() {
                             return START_NOT_STICKY
                         }
                     deviceAddress = address
+                    profileOverride = intent.getStringExtra(EXTRA_PROFILE_OVERRIDE) ?: "auto"
                     isRunning = true
                     powerOffRequested = false   // fresh start, not a leftover power-off
                     Log.d(tag, "Starting service, device=$address")
@@ -367,9 +372,20 @@ class BluetoothAncService : Service() {
 
                     val device: BluetoothDevice = adapter.getRemoteDevice(address)
 
-                    // Detect headphone model from device name
-                    profile = HeadphoneProfile.detect(device.name ?: "")
-                    Log.d(tag, "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)")
+                    // Detect headphone model from device name, unless the user pinned
+                    // one. A silent fallback to XM6 is the wrong default to be stuck
+                    // with on hardware you cannot test against, so the override is
+                    // threaded through to here rather than living in the UI only.
+                    profile = when (profileOverride) {
+                        "xm5" -> HeadphoneProfile.Xm5
+                        "xm6" -> HeadphoneProfile.Xm6
+                        else -> HeadphoneProfile.detect(device.name ?: "")
+                    }
+                    Log.d(
+                        tag,
+                        "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)" +
+                            if (profileOverride != "auto") " [pinned: $profileOverride]" else "",
+                    )
                     try {
                         btSocket?.close()
                     } catch (_: Exception) {}
@@ -1311,6 +1327,12 @@ class BluetoothAncService : Service() {
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
+
+        /**
+         * "auto" (default), "xm5" or "xm6". Lets the user pin a protocol when the
+         * device name is unhelpful or the fallback guess is wrong.
+         */
+        const val EXTRA_PROFILE_OVERRIDE = "profile_override"
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"

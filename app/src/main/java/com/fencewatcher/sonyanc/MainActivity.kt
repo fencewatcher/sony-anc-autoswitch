@@ -23,6 +23,7 @@ import androidx.core.content.ContextCompat
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.STATUS_BROADCAST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PROFILE_OVERRIDE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
@@ -261,6 +262,31 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerDevice.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
+
+        // Protocol override. Auto-detect falls back to XM6 for any name it does not
+        // recognise, which is the wrong thing to be stuck with on hardware you cannot
+        // test — so the model can be pinned explicitly. Applies on next start.
+        val profileValues = arrayOf("auto", "xm6", "xm5")
+        val profileAdapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_spinner_item)
+        profileAdapter.addAll("Auto-detect", "WH-1000XM6", "WH-1000XM5")
+        profileAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        binding.spinnerProfile.adapter = profileAdapter
+        var profileSpinnerReady = false
+        binding.spinnerProfile.setSelection(
+            profileValues.indexOf(profilePreference()).coerceAtLeast(0),
+        )
+        profileSpinnerReady = true
+        binding.spinnerProfile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                if (!profileSpinnerReady) return
+                val value = profileValues.getOrElse(pos) { "auto" }
+                getSharedPreferences("anc_settings", MODE_PRIVATE).edit()
+                    .putString("profile_override", value).apply()
+                updateProfileLabel()
+            }
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+        updateProfileLabel()
 
         // EQ
         binding.btnEQOff.setOnClickListener { selectPreset(0x00) }
@@ -548,7 +574,14 @@ class MainActivity : AppCompatActivity() {
                 saveAutomation()
                 true
             }
-            box.addView(row)
+            box.addView(row, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply {
+                // Same fix as the multipoint rows: these were stacked flush, so the
+                // rule rows and the hint text ran together.
+                if (index > 0) topMargin = dp(8)
+            })
         }
         if (automationRules.isNotEmpty()) {
             box.addView(android.widget.TextView(this).apply {
@@ -863,7 +896,7 @@ class MainActivity : AppCompatActivity() {
         binding.switchVoice.isChecked = prefs.getBoolean("voice_passthrough_$addr", false)
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
         val name = pairedDevices.find { it.address == addr }?.name ?: ""
-        binding.textProfile.text = "Protocol: ${HeadphoneProfile.detect(name).modelName}"
+        updateProfileLabel(name)
     }
 
 
@@ -879,6 +912,27 @@ class MainActivity : AppCompatActivity() {
      */
     private fun applyAmbientNow() {
         if (BluetoothAncService.isRunning) sendToService(ACTION_APPLY_AMBIENT) {}
+    }
+
+    private fun profilePreference(): String =
+        getSharedPreferences("anc_settings", MODE_PRIVATE).getString("profile_override", "auto") ?: "auto"
+
+    /**
+     * Mirrors the protocol the service will actually use. On auto it names the model
+     * detect() resolved to, so the silent XM6 fallback is visible rather than a
+     * surprise at connect time.
+     */
+    private fun updateProfileLabel(deviceName: String = "") {
+        val pinned = profilePreference()
+        binding.textProfile.text = when (pinned) {
+            "xm5" -> "Protocol: WH-1000XM5 (pinned)"
+            "xm6" -> "Protocol: WH-1000XM6 (pinned)"
+            else -> {
+                val guess = HeadphoneProfile.detect(deviceName).modelName
+                val warn = if (deviceName.contains("XM", ignoreCase = true)) "" else "  ·  name not recognised"
+                "Protocol: $guess$warn"
+            }
+        }
     }
 
     private fun saveSetting(key: String, value: Any) {
@@ -972,7 +1026,9 @@ class MainActivity : AppCompatActivity() {
         ) { permissionLauncher.launch(requiredPermissions); return }
         val device = pairedDevices[pos]
         Intent(this, BluetoothAncService::class.java).apply {
-            action = ACTION_START; putExtra(EXTRA_ADDRESS, device.address)
+            action = ACTION_START
+            putExtra(EXTRA_ADDRESS, device.address)
+            putExtra(EXTRA_PROFILE_OVERRIDE, profilePreference())
         }.also { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it) else startService(it) }
         updateServiceRunning(true); updateCardStatus("Starting…")
     }
