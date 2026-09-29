@@ -752,6 +752,7 @@ class BluetoothAncService : Service() {
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_NOTIFY,
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
                         // XM6 carries the PriorMode byte at index 2; XM5 inserts a
                         // setting-type byte first, so it lands at index 3.

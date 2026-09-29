@@ -116,6 +116,14 @@ class MainActivity : AppCompatActivity() {
 
     /** null until the headphones report LDAC activity. */
     private var ldacActive: Boolean? = null
+
+    /**
+     * Spinner.setSelection fires onItemSelected asynchronously, so by the time
+     * the listener runs the shared [updatingUi] window has already closed and a
+     * programmatic update looks like a user action. This flag is cleared on the
+     * next frame instead, and only guards this one spinner.
+     */
+    private var suppressConnectionCallback = false
     private var autoPowerOffMode = 0
     /** True = "Fix Playback": multipoint will not hand audio to another device. */
     private var playbackFixed = false
@@ -414,7 +422,7 @@ class MainActivity : AppCompatActivity() {
         binding.spinnerConnectionMode.adapter = connAdapter
         binding.spinnerConnectionMode.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                if (!connectionSpinnerReady || updatingUi) return
+                if (!connectionSpinnerReady || suppressConnectionCallback) return
                 sendToService(ACTION_SET_CONNECTION_MODE) { putExtra("sound_quality", pos == 0) }
             }
             override fun onNothingSelected(p: AdapterView<*>?) {}
@@ -874,16 +882,24 @@ class MainActivity : AppCompatActivity() {
             if (idx >= 0) binding.spinnerAutoPower.setSelection(idx)
         }
         connectionSoundQuality?.let { sq ->
-            binding.spinnerConnectionMode.setSelection(if (sq) 0 else 1)
+            val idx = if (sq) 0 else 1
+            if (binding.spinnerConnectionMode.selectedItemPosition != idx) {
+                suppressConnectionCallback = true
+                binding.spinnerConnectionMode.setSelection(idx, false)
+                binding.spinnerConnectionMode.post { suppressConnectionCallback = false }
+            }
             val base = if (sq) {
                 "Sound quality — the headphones may use LDAC or aptX when the phone offers them."
             } else {
                 "Connection priority — favours stability and range over audio quality."
             }
+            // Only shown when the headphones actually answer. The XM6 ignores the
+            // LDAC status request outright, so a permanent "unknown" line would be
+            // a readout that can never resolve.
             binding.textConnectionStatus.text = when (ldacActive) {
                 true -> "$base\nLDAC: active"
                 false -> "$base\nLDAC: not in use"
-                null -> "$base\nLDAC: unknown"
+                null -> base
             }
         }
         // Wearing-detection debug: hidden until the headphones actually answer, so

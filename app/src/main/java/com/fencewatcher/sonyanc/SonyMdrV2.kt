@@ -196,6 +196,13 @@ object SonyMdrV2 {
     // changed and the toggle looked pinned.
     const val AUDIO_TYPE_CONNECTION_MODE_XM6 = 0x02 // set and read
     const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // set and read
+    /**
+     * The headphones answer a set with a *notify* under this type, not a readback
+     * — e.g. `e8 02 01` is answered `e9 05 01 00`, roughly 100ms before the
+     * `e7 02 ..` readback. Decoding it is what makes the selector feel current
+     * instead of trailing the round trip.
+     */
+    const val AUDIO_TYPE_CONNECTION_NOTIFY = 0x05
     const val CONNECTION_SETTING_SOUND_CONNECTION = 0x00 // XM5 only
     const val PRIOR_SOUND_QUALITY = 0x00
     const val PRIOR_CONNECTION_QUALITY = 0x01
