@@ -4,6 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.CheckBox
@@ -92,7 +93,10 @@ class DebugActivity : android.app.Activity() {
         super.onResume()
         // These are package-private broadcasts, so the filter does not leak the log
         // to other apps even though the values are not sensitive.
-        registerReceiver(logReceiver, IntentFilter(FRAME_LOG_BROADCAST))
+        // targetSdk 34 requires an export flag on registerReceiver, or this throws
+        // SecurityException the moment the screen opens. Matched to MainActivity.
+        registerReceiver(logReceiver, IntentFilter(FRAME_LOG_BROADCAST),
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) Context.RECEIVER_NOT_EXPORTED else 0)
         registered = true
         // Ask for whatever has already been captured this session — fetching must not
         // clear, or opening the menu would throw away the very frames being debugged.
