@@ -729,10 +729,25 @@ class MainActivity : AppCompatActivity() {
     private fun updateAllowlistPermissionWarning() {
         val enabled = getSharedPreferences("anc_settings", MODE_PRIVATE)
             .getBoolean("allowlist_enabled", false)
-        val hasAccess = androidx.core.app.NotificationManagerCompat
-            .getEnabledListenerPackages(this).contains(packageName)
+        val hasAccess = MediaAppTracker.isNotificationAccessGranted(this)
         val w = binding.textAllowlistPermissionWarning
-        w.visibility = if (enabled && !hasAccess) android.view.View.VISIBLE else android.view.View.GONE
+        val show = enabled && !hasAccess
+        w.visibility = if (show) View.VISIBLE else View.GONE
+        if (show) w.text = "Notification access not granted — the filter can't see which app " +
+            "is playing, so nothing will trigger. Enable \"${getString(R.string.app_name)}\" in " +
+            "Settings > Apps > Special app access > Notification access, then reopen this app."
+    }
+
+    /**
+     * Re-check on every return to the foreground.
+     *
+     * The permission is granted in system Settings, so the activity resumes with
+     * whatever it last computed. Without this the warning stayed visible after
+     * access was granted — reporting "denied" for a permission that was on.
+     */
+    override fun onResume() {
+        super.onResume()
+        updateAllowlistPermissionWarning()
     }
 
     private fun saveSetting(key: String, value: Any) {

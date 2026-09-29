@@ -52,16 +52,35 @@ object MediaAppTracker {
      *
      * Read from `enabled_notification_listeners` rather than assumed, because the
      * only symptom of missing access is that attribution silently resolves to
-     * "nothing playing" and the filter denies everything — which is invisible
-     * unless something surfaces it.
+     * "nothing playing" and the filter denies everything.
+     *
+     * Both sources are consulted and OR'd together on purpose. Reporting "denied"
+     * for a permission that is actually granted sends the user off to re-grant
+     * something they already granted, so a false negative is the costly direction
+     * here; a false positive only leaves an extra notice on screen.
      */
     fun isNotificationAccessGranted(context: Context): Boolean {
-        val enabled = android.provider.Settings.Secure.getString(
-            context.contentResolver, "enabled_notification_listeners",
-        ) ?: return false
         val expected = ComponentName(context, MediaNotificationListener::class.java)
             .flattenToString()
-        return enabled.split(':').any { it == expected }
+
+        val fromSecure = try {
+            android.provider.Settings.Secure.getString(
+                context.contentResolver, "enabled_notification_listeners",
+            )?.split(':')?.any { it.equals(expected, ignoreCase = true) } == true
+        } catch (e: Exception) {
+            Log.w(TAG, "enabled_notification_listeners read failed: ${e.message}"); false
+        }
+
+        val fromCompat = try {
+            androidx.core.app.NotificationManagerCompat
+                .getEnabledListenerPackages(context).contains(context.packageName)
+        } catch (e: Exception) {
+            Log.w(TAG, "getEnabledListenerPackages failed: ${e.message}"); false
+        }
+
+        val granted = fromSecure || fromCompat
+        Log.d(TAG, "notif access: secure=$fromSecure compat=$fromCompat -> $granted")
+        return granted
     }
 
     /** Packages whose media session is currently in STATE_PLAYING. */
