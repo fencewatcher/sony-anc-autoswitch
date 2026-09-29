@@ -889,6 +889,7 @@ class MainActivity : AppCompatActivity() {
         binding.imageModel.setImageResource(
             when {
                 name.contains("XM6", ignoreCase = true) -> R.drawable.model_xm6
+                name.contains("XM5", ignoreCase = true) -> R.drawable.model_xm5
                 else -> R.drawable.ic_headphones_big
             }
         )
