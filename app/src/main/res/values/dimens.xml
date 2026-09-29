@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Horizontal gutter for the four tab panes (Home, Audio, Devices, Routines).
+
+      This was previously edited by hand in four separate places, and it took
+      three passes to land on a value that looked right: 32dp read as too much
+      gap, 0dp read as too little. It lives here now so it can be tuned once.
+    -->
+    <dimen name="content_gutter">8dp</dimen>
+</resources>
