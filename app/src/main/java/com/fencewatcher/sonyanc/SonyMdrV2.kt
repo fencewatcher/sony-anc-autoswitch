@@ -262,13 +262,21 @@ object SonyMdrV2 {
     }
 
     /**
-     * Only `sptf` → Spotify is a confident identification. `xiao` and
-     * `qMscDirect` are internal names whose user-facing meaning is not
-     * recoverable from the code, so they are shown raw rather than guessed at.
+     * Only sptf → Spotify is a confident identification, though the Sony app
+     * labels that entry "Spotify Tap". `xiao` and `qMscDirect` are Tencent —
+     * the app binds them to one preset, TENCENT_XIAOWEI_Q_MSC — so they are
+     * China-region services and will do nothing on a German account.
+     *
+     * The service list is region-dependent: the Sony app offers Amazon Music,
+     * Endel, Spotify Tap and YouTube Music to European accounts, but only these
+     * four values are ever constructed in the code we decompiled, so the wire
+     * values for the others are not known here.
      */
     fun quickAccessName(v: Int): String = when (v) {
         QUICK_ACCESS_NONE -> "None"
-        QUICK_ACCESS_SPTF -> "Spotify"
+        QUICK_ACCESS_SPTF -> "Spotify Tap"
+        QUICK_ACCESS_XIAO -> "Xiaowei (Tencent)"
+        QUICK_ACCESS_QMSC_DIRECT -> "Tencent Q Music"
         else -> "0x%02x".format(v)
     }
 
