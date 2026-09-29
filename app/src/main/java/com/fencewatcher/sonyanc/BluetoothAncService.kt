@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.IOException
 import kotlinx.coroutines.*
+import kotlinx.coroutines.sync.Mutex
 import java.util.UUID
 
 /**
@@ -211,7 +212,7 @@ class BluetoothAncService : Service() {
 
                 ACTION_SYNC_STATE -> {
                     scope.launch {
-                        queryAllState()
+                        runSweep()
                         broadcastStats()
                     }
                 }
@@ -499,7 +500,7 @@ class BluetoothAncService : Service() {
                     // Probe every feature we can display, on both command tables.
                     // The peripheral/multipoint family only answers on table 2.
                     Log.d(tag, "Querying full device state (T1 + T2)")
-                    queryAllState()
+                    runSweep()
                     delay(200L)
 
                     Log.d(tag, "Handshake complete — re-applying automation rules")
@@ -512,14 +513,21 @@ class BluetoothAncService : Service() {
                         while (isActive && btSocket != null) {
                             delay(60_000L)
                             if (!isActive || btSocket == null) break
-                            sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
-                            sendFrame(SonyMdrV2.buildAudioCodecGet())
-                            sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
-                            sendFrame(SonyMdrV2.buildLeAudioStatusGet())
-                            sendFrame(SonyMdrV2.buildQuickAccessEnableGet())
-                            sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
-                            sendFrame(SonyMdrV2.buildUpscalingStatusGet())
-                            delay(500L)
+                            // Same exclusion as the full sweep: a poll landing mid-sweep
+                            // interleaves frames and desyncs the link.
+                            if (!sweepLock.tryLock()) continue
+                            try {
+                                sendFrame(byteArrayOf(0x22, 0x00))  // battery inquiry
+                                sendFrame(SonyMdrV2.buildAudioCodecGet())
+                                sendFrame(SonyMdrV2.buildWearingStatusGet(), SonyMdrV2.Table.T2)
+                                sendFrame(SonyMdrV2.buildLeAudioStatusGet())
+                                sendFrame(SonyMdrV2.buildQuickAccessEnableGet())
+                                sendFrame(SonyMdrV2.buildQuickAccessFunctionGet())
+                                sendFrame(SonyMdrV2.buildUpscalingStatusGet())
+                                delay(500L)
+                            } finally {
+                                sweepLock.unlock()
+                            }
                             runAutomation(currentPlaybackTrigger())
                         }
                     }
@@ -951,6 +959,33 @@ class BluetoothAncService : Service() {
     }
 
     /** Query everything we can display, on both command tables. */
+    /**
+     * Serialises every outbound state query.
+     *
+     * The frame log shows three sweeps running at once on a fresh connection —
+     * connect, the activity coming to the foreground, and the periodic poll —
+     * each interleaving its frames with the others over one socket and one
+     * sequence counter. The link is stop and wait, and the result was the
+     * device's banner frame arriving four times in a row at 3ms intervals,
+     * plus the first few connections failing outright.
+     *
+     * A sweep already running now causes the next request to be dropped rather
+     * than run concurrently.
+     */
+    private val sweepLock = Mutex()
+
+    private suspend fun runSweep() {
+        if (!sweepLock.tryLock()) {
+            Log.d(tag, "State sweep already running, skipping")
+            return
+        }
+        try {
+            queryAllState()
+        } finally {
+            sweepLock.unlock()
+        }
+    }
+
     private suspend fun queryAllState() {
         // The headset silently drops the tail of a long burst. A 30 frame sweep sent
         // back to back answers the first handful and then nothing: codec, wear, LE
