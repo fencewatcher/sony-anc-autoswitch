@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Was the same Material "headset" glyph as the in-app icon: an open C-arc with a
-  notch, which reads as a horseshoe rather than headphones. Rebuilt from parts
-  (stroked headband arc + two separate ear cups) so each element stays legible.
+  Launcher icon. Same geometry as the in-app icon: headband legs at 4.4/19.6
+  with a 7.6 radius semicircle so the band lines up with the ear cups.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp"
@@ -15,7 +14,7 @@
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFFFF"
         android:strokeWidth="2.2"
-        android:pathData="M4,15 v-3 a8,8 0 0 1 16,0 v3" />
+        android:pathData="M4.4,15 v-3 a7.6,7.6 0 0 1 15.2,0 v3" />
 
     <!-- left ear cup -->
     <path

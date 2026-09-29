@@ -1,14 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Two previous attempts rendered as a horseshoe/magnet: one used the Material
-  "headset" glyph (an open C-arc with a notch), the next hand-wrote a single
-  filled silhouette whose ear cups were tall enough to read as the poles of a
-  magnet rather than as earcups.
+  In-app hero icon.
 
-  This is built from parts instead of one blob, so each element stays legible:
-  a stroked headband arc, and two separate rounded ear cups. When a real
-  product photo lands in drawable-nodpi/ this stays as the fallback for
-  unrecognised models.
+  The headband legs were at x 4 and 20 while the ear cups centre on 4.4 and
+  19.6, so the band sat 0.4 outboard of the cups it connects. Legs are now at
+  4.4/19.6 with a 7.6 radius semicircle, which is exactly the gap between them.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="72dp"
@@ -16,12 +12,12 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
 
-    <!-- headband: half-circle arc with short legs down to the ear cups -->
+    <!-- headband -->
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FFD8D8D8"
         android:strokeWidth="2.1"
-        android:pathData="M4,15 v-3 a8,8 0 0 1 16,0 v3" />
+        android:pathData="M4.4,15 v-3 a7.6,7.6 0 0 1 15.2,0 v3" />
 
     <!-- left ear cup -->
     <path

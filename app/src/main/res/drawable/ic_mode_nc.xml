@@ -2,11 +2,11 @@
 <!--
   Noise cancelling.
 
-  The first version drew a head, two ear cups and a chin as four independent
-  paths, and they did not join up: it rendered as an unrecognisable blob. This
-  is a single continuous silhouette — outer headband, down into the left cup,
-  across the inner headband arc, down the right cup, back up — so there are no
-  seams to misalign.
+  The previous path was measurably lopsided: outer span x 3..20 and cup inner
+  span x 8..15 both centre on 11.5, not 12, which reads as an arch leaning
+  left. This one centres exactly on 12 — outer 3..21, cup inner 8..16, and
+  every control point is the mirror of its opposite (7.03 <-> 16.97,
+  3 <-> 21).
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -15,5 +15,5 @@
     android:viewportHeight="24">
     <path
         android:fillColor="#FFFFFFFF"
-        android:pathData="M12,2C7.03,2 3,6.03 3,11v6.5c0,1.38 1.12,2.5 2.5,2.5h2v-8H6.5V11C6.5,7.96 9,4.5 12,4.5s5.5,3.46 5.5,6.5v1H15v8h2.5c1.38,0 2.5,-1.12 2.5,-2.5V11C21,6.03 16.97,2 12,2z" />
+        android:pathData="M12,2C7.03,2 3,6.03 3,11v6a2,3 0 0 0 2,3h3v-8H6.5V11C6.5,7.96 9,4.5 12,4.5s5.5,3.46 5.5,6.5v1H16v8h3a2,3 0 0 0 2,-3v-6C21,6.03 16.97,2 12,2z" />
 </vector>
