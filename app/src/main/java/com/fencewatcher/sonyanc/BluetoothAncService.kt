@@ -959,7 +959,7 @@ class BluetoothAncService : Service() {
         // gets a turn before the next is written.
         suspend fun q(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
             delay(50L)
-            q(payload, table)
+            sendFrame(payload, table)
         }
 
         // Table 1 — main features
