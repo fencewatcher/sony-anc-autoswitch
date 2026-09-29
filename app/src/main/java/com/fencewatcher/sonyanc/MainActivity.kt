@@ -949,13 +949,16 @@ class MainActivity : AppCompatActivity() {
             BluetoothAncService.Status.ERROR -> Color.rgb(226, 128, 128)
         }
         val label = status.name.lowercase().replaceFirstChar { it.uppercase() }
-        // The broadcast message is usually just the status restated ("Disconnected",
-        // "Connected"), so appending it unconditionally rendered
-        // "DISCONNECTED — Disconnected". Only show it when it adds something.
-        val text = if (msg != null && !msg.trim().equals(label, ignoreCase = true)) {
-            "$label — $msg"
-        } else {
-            label
+        // The broadcast message usually restates the status and sometimes adds
+        // detail ("Connecting…", "Disconnected, reconnecting…"). Comparing for
+        // equality was not enough — an ellipsis or trailing word both defeat it,
+        // which is why CONNECTING still rendered "CONNECTING — Connecting…".
+        // If the message already begins with the label, show the message alone:
+        // no duplication, and nothing is lost.
+        val text = when {
+            msg == null -> label
+            msg.trim().lowercase().startsWith(label.lowercase()) -> msg
+            else -> "$label — $msg"
         }
         updateCardStatus(text)
         binding.textStatus.setTextColor(tint)
