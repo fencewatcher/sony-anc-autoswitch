@@ -230,12 +230,6 @@ object SonyMdrV2 {
     const val CMD_PERI_SET_EXT_PARAM = 0x3C
     const val CMD_PERI_NTFY_EXT_PARAM = 0x3D
 
-    /** PeripheralInquiredType */
-    const val PERI_TYPE_PAIRING_DEVICE_MGMT_CLASSIC = 0x00
-    const val PERI_TYPE_SOURCE_SWITCH_CONTROL = 0x01
-    const val PERI_TYPE_PAIRING_DEVICE_MGMT_COD = 0x02
-    const val PERI_TYPE_MUSIC_HAND_OVER = 0x03
-
     /**
      * Lock / unlock automatic source switching — the Sony app calls this
      * "Fix Playback". Disabling source-switch control pins playback to whichever
@@ -249,11 +243,11 @@ object SonyMdrV2 {
      * so the flag written here is "fix playback": true means locked.
      */
     fun buildSourceSwitchControlGet(): ByteArray = byteArrayOf(
-        CMD_PERI_GET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH_CONTROL.toByte(),
+        CMD_PERI_GET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH.toByte(),
     )
 
     fun buildSourceSwitchControlSet(fixPlayback: Boolean): ByteArray = byteArrayOf(
-        CMD_PERI_SET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH_CONTROL.toByte(),
+        CMD_PERI_SET_PARAM.toByte(), PERI_TYPE_SOURCE_SWITCH.toByte(),
         if (fixPlayback) 0x01 else 0x00,
     )
 
@@ -437,7 +431,6 @@ object SonyMdrV2 {
     // `PowerNotifyStatusLinkControl` is [command, LINK_CONTROL, EnableDisable],
     // so the set form is the same three bytes. 0x07 = LINK_CONTROL.
 
-    const val CMD_POWER_SET_STATUS = 0x24
     const val POWER_TYPE_LINK_CONTROL = 0x07
 
     /** Enter or leave Bluetooth pairing mode. */
