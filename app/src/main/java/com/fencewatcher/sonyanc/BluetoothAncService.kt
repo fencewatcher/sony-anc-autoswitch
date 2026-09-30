@@ -1060,6 +1060,18 @@ class BluetoothAncService : Service() {
                 }
             }
 
+            // SYSTEM_RET_PARAM (0xF7) — answers a 0xF6 SYSTEM_GET_PARAM. The
+            // button mapping arrives here: buildAssignableSettingsGet() is f6 03,
+            // so the reply is f7 03, not f3 03. Nothing parsed this before, and
+            // the payload layout is still unknown, so it is logged verbatim rather
+            // than decoded. An empty reply means the XM6 does not expose it.
+            SonyMdrV2.CMD_SYSTEM_RET_PARAM -> {
+                val ptype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                if (ptype == SonyMdrV2.SYS_TYPE_ASSIGNABLE_SETTINGS) {
+                    Log.d(tag, "Assignable settings: ${SonyMdrV2.hex(p)}")
+                }
+            }
+
             // SENSE (wearing / adaptive control). Not driven yet — the XM6
             // semantics are not understood well enough to write to. Captured raw
             // so the format can be learned from real hardware instead of guessed.
@@ -1117,6 +1129,10 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildBgmGet())
         request(SonyMdrV2.buildUpmixGet())
         request(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        // Button mapping. The reply shape is not established yet, so it is
+        // captured raw rather than parsed -- this is the step that makes the
+        // [NC/AMB] remap possible instead of guessed at.
+        request(SonyMdrV2.buildAssignableSettingsGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
