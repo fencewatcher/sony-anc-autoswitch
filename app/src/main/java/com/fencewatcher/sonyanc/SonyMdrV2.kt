@@ -243,19 +243,21 @@ object SonyMdrV2 {
     // between — do not mix the two.
     const val QUICK_ACCESS_NONE = 0x00
     const val QUICK_ACCESS_SPTF = 0x01
+
+    // China-region services. Real, but absent from the EU app, so they are named
+    // for readback and deliberately not offered in the picker.
     const val QUICK_ACCESS_XIAO = 0x04
     const val QUICK_ACCESS_QMSC_DIRECT = 0x07
 
     /**
-     * YouTube Music — observed, not reverse engineered.
-     *
-     * Set in the Sony app on a WH-1000XM6, the device answered f6 0d with
-     * `f7 0d 02 0c 00`: two Quick Access slots, slot 0 = 0x0c. The APK contains no
-     * reference to 0x0c, because the service catalogue is delivered by Sony's
-     * backend and the shipped enum only wraps the four values its own code paths
-     * mention — two of them Tencent/China. So this is the first EU service
-     * identified, and it came from the hardware rather than the decompile.
+     * The EU services, identified on a WH-1000XM6 by setting each one in the Sony
+     * app and reading `f6 0d`. The APK contains no reference to any of them: the
+     * service catalogue is delivered by Sony's backend and the shipped enum only
+     * wraps the values its own code paths mention. The ids are not contiguous
+     * (1, 2, 3, 12), so they are assigned server-side and cannot be inferred.
      */
+    const val QUICK_ACCESS_ENDEL = 0x02
+    const val QUICK_ACCESS_AMAZON_MUSIC = 0x03
     const val QUICK_ACCESS_YOUTUBE_MUSIC = 0x0C
 
     fun buildQuickAccessEnableGet(): ByteArray =
@@ -287,6 +289,8 @@ object SonyMdrV2 {
     fun quickAccessName(v: Int): String = when (v) {
         QUICK_ACCESS_NONE -> "None"
         QUICK_ACCESS_SPTF -> "Spotify Tap"
+        QUICK_ACCESS_ENDEL -> "Endel"
+        QUICK_ACCESS_AMAZON_MUSIC -> "Amazon Music Play Now"
         QUICK_ACCESS_YOUTUBE_MUSIC -> "YouTube Music"
         QUICK_ACCESS_XIAO -> "Xiaowei (Tencent)"
         QUICK_ACCESS_QMSC_DIRECT -> "Tencent Q Music"

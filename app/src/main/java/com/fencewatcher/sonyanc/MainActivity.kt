@@ -159,9 +159,9 @@ class MainActivity : AppCompatActivity() {
     private val qaValues = intArrayOf(
         SonyMdrV2.QUICK_ACCESS_NONE,
         SonyMdrV2.QUICK_ACCESS_SPTF,
+        SonyMdrV2.QUICK_ACCESS_ENDEL,
+        SonyMdrV2.QUICK_ACCESS_AMAZON_MUSIC,
         SonyMdrV2.QUICK_ACCESS_YOUTUBE_MUSIC,
-        SonyMdrV2.QUICK_ACCESS_XIAO,
-        SonyMdrV2.QUICK_ACCESS_QMSC_DIRECT,
     )
 
     private var suppressQaCallback = false
