@@ -66,13 +66,15 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 
 ### Known gaps
 
-- **LE Audio transport switching is not implemented.** The write needs four fields
-  (two `EnableDisable` flags, a `ConnModeSettingType` and a `QualityPriorValue`), and
-  the two enum byte codes could not be recovered — jadx fails on `QualityPriorValue`
-  with *"Init of enum field 'SOUND' uses external variables"*. Sending only the two
-  bytes that are known produces a frame the headset rejects, which is why an earlier
-  toggle appeared to do nothing. The status query is still issued and the raw reply
-  logged, so the semantics can be pinned from a capture instead of guessed at.
+- **LE Audio transport switching is not implemented.** The set payload is four
+  fields: `isLEAudioType`, `isLEAItem`, a `ConnModeSettingType` and a
+  `QualityPriorValue`. An earlier version sent only two bytes, so the frame was
+  truncated *and* expressed the wrong idea — the booleans are LE Audio markers,
+  not an on/off pair. The enum byte codes were recovered from smali (`PriorMode` is
+  0/1/2, `ConnModeSettingType` has a single `SOUND_CONNECTION`), but the wire order
+  of the four fields is not visible statically, and guessing it has already cost
+  five broken releases. The status query is still issued and the raw reply logged,
+  so a capture from the official app can settle the order.
 
 ## Requirements
 
