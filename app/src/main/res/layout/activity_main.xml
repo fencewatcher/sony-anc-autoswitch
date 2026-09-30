@@ -160,9 +160,7 @@
 
         <TextView android:id="@+id/textConnectionStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FFAAAAAA" android:text="Sound quality lets the headphones prefer LDAC or aptX when the phone offers them. Connection priority favours stability and range." />
 
-        <Switch android:id="@+id/switchLeAudio" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="LE Audio transport" android:textSize="13sp" android:textColor="#FFCCCCCC" android:paddingTop="10dp" android:visibility="gone" />
 
-        <TextView android:id="@+id/textLeAudioNote" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="10sp" android:textColor="#FF888888" android:visibility="gone" />
 
         
     </LinearLayout>

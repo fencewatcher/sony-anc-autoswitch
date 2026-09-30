@@ -142,10 +142,9 @@ class MainActivity : AppCompatActivity() {
     private var suppressConnectionCallback = false
 
     /** Same guard for the LE Audio switch, which also fires its listener async. */
-    private var suppressLeCallback = false
 
     /** LE Audio transport active, or null until reported. */
-    private var leAudio: Boolean? = null
+    private var leAudio: Boolean? = null   // transport state, logged only; no UI yet
 
     /** Quick access functions as reported. Index 0 = left, 1 = right. */
     private var quickAccessFunctions: IntArray? = null
@@ -592,11 +591,6 @@ class MainActivity : AppCompatActivity() {
         }
         binding.spinnerQaLeft.onItemSelectedListener = qaListener
         binding.spinnerQaRight.onItemSelectedListener = qaListener
-
-        binding.switchLeAudio.setOnCheckedChangeListener { _, checked ->
-            if (!connectionSpinnerReady || suppressLeCallback) return@setOnCheckedChangeListener
-            sendToService(BluetoothAncService.ACTION_SET_LE_AUDIO) { putExtra("le_audio", checked) }
-        }
 
         // Connection mode: sound quality vs connection stability. This picks a
         // *priority*, not a codec — the active codec is negotiated with the phone
@@ -1130,24 +1124,15 @@ class MainActivity : AppCompatActivity() {
             null -> binding.imageWear.visibility = android.view.View.GONE
         }
 
-        // LE Audio transport. Hidden until the headphones report it, so the card
-        // stays clean on hardware that never answers the status query.
-        val le = leAudio
-        if (le == null) {
-            binding.switchLeAudio.visibility = android.view.View.GONE
-            binding.textLeAudioNote.visibility = android.view.View.GONE
-        } else {
-            binding.switchLeAudio.visibility = android.view.View.VISIBLE
-            binding.textLeAudioNote.visibility = android.view.View.VISIBLE
-            if (binding.switchLeAudio.isChecked != le) {
-                suppressLeCallback = true
-                binding.switchLeAudio.isChecked = le
-                binding.switchLeAudio.post { suppressLeCallback = false }
-            }
-            binding.textLeAudioNote.text =
-                if (le) "LE Audio active — switching drops the Bluetooth link briefly."
-                else "Classic Bluetooth audio."
-        }
+        // LE Audio: the control is gone until the payload can be built correctly.
+        // The write needs four fields -- two EnableDisable flags, a
+        // ConnModeSettingType and a QualityPriorValue -- and the two enum byte
+        // codes are not recoverable, because jadx failed on QualityPriorValue
+        // ("Init of enum field 'SOUND' uses external variables"). Sending the two
+        // bytes we do know produces a frame the headset rejects, which is why
+        // toggling it did nothing. The status query is still issued and the raw
+        // reply logged, so the semantics can be pinned from a capture instead of
+        // guessed at.
         updatingUi = false
         renderFeatureStatus()
     }

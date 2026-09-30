@@ -34,7 +34,6 @@
   - EQ state read back from the headphones — sliders show the actual current curve
 - **📶 Multipoint** — List paired devices, see the active source, switch, connect/disconnect, unpair
 - **🖐️ Quick Access** — Choose what a double- or triple-press of the [NC/AMB] button launches
-- **🎚️ LE Audio transport** — Switch between LE Audio and Classic Bluetooth audio
 - **⏻ Power off** — Shut the headphones down from the app
 - **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Home tab
 
@@ -48,7 +47,7 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 |---|---|
 | **Home** | Headphone card (model, battery, mode, wear indicator, codec), Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
 | **Audio** | EQ presets + draggable curve, ambient, voice passthrough, speak-to-chat, DSEE, BGM, upmix, voice guidance |
-| **Devices** | Headphone picker, connection mode, LE Audio, multipoint list, playback lock, pairing mode |
+| **Devices** | Headphone picker, connection mode, multipoint list, playback lock, pairing mode |
 | **Routines** | Quick Access shortcuts, then your automation rules |
 
 ### Developer
@@ -64,6 +63,16 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 3. Media plays → sends the ANC-on payload; paused → ambient payload
 4. Bluetooth drops → automatic reconnection with backoff
 5. State is read back from the headphones with a real stop-and-wait request/response exchange
+
+### Known gaps
+
+- **LE Audio transport switching is not implemented.** The write needs four fields
+  (two `EnableDisable` flags, a `ConnModeSettingType` and a `QualityPriorValue`), and
+  the two enum byte codes could not be recovered — jadx fails on `QualityPriorValue`
+  with *"Init of enum field 'SOUND' uses external variables"*. Sending only the two
+  bytes that are known produces a frame the headset rejects, which is why an earlier
+  toggle appeared to do nothing. The status query is still issued and the raw reply
+  logged, so the semantics can be pinned from a capture instead of guessed at.
 
 ## Requirements
 
