@@ -159,11 +159,24 @@ class MainActivity : AppCompatActivity() {
     private val qaValues = intArrayOf(
         SonyMdrV2.QUICK_ACCESS_NONE,
         SonyMdrV2.QUICK_ACCESS_SPTF,
+        SonyMdrV2.QUICK_ACCESS_YOUTUBE_MUSIC,
         SonyMdrV2.QUICK_ACCESS_XIAO,
         SonyMdrV2.QUICK_ACCESS_QMSC_DIRECT,
     )
 
     private var suppressQaCallback = false
+
+    /**
+     * Slots whose current device value is not in [qaValues].
+     *
+     * The Quick Access write is whole-array, so a slot holding an assignment this
+     * app cannot render used to be overwritten with whatever the spinner happened
+     * to display — turning a real service into "None". That is how a YouTube
+     * Music assignment (0x0c) set in the Sony app got silently reverted here
+     * within a few seconds of being read. Such slots are now carried through
+     * untouched instead.
+     */
+    private var qaUnmapped = booleanArrayOf(false, false)
 
     /** Last array actually written, so a repeated selection does not rewrite it. */
     private var lastSentQa: IntArray? = null
@@ -195,6 +208,9 @@ class MainActivity : AppCompatActivity() {
      */
     private fun bindQaSpinner(spinner: android.widget.Spinner, value: Int) {
         val idx = qaValues.indexOf(value)
+        // Record whether this slot's device value is one we can actually show.
+        val slot = if (spinner === binding.spinnerQaLeft) 0 else 1
+        qaUnmapped[slot] = idx < 0
         if (idx >= 0 && spinner.selectedItemPosition != idx) {
             suppressQaCallback = true
             spinner.setSelection(idx, false)
@@ -576,8 +592,12 @@ class MainActivity : AppCompatActivity() {
                 val base = quickAccessFunctions
                     ?: intArrayOf(SonyMdrV2.QUICK_ACCESS_NONE, SonyMdrV2.QUICK_ACCESS_NONE)
                 val out = base.copyOf(maxOf(base.size, 2))
-                out[0] = qaValues[binding.spinnerQaLeft.selectedItemPosition]
-                out[1] = qaValues[binding.spinnerQaRight.selectedItemPosition]
+                // Preserve any slot the device holds a value for that this app
+                // cannot represent, rather than substituting the spinner's value.
+                if (!qaUnmapped[0])
+                    out[0] = qaValues[binding.spinnerQaLeft.selectedItemPosition]
+                if (!qaUnmapped[1])
+                    out[1] = qaValues[binding.spinnerQaRight.selectedItemPosition]
                 // Both spinners fire their initial callback, so the same array used to
                 // be written twice back to back with consecutive sequence numbers.
                 if (out.contentEquals(lastSentQa)) return
