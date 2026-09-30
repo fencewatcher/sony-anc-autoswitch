@@ -338,16 +338,17 @@ class MainActivity : AppCompatActivity() {
                 // dead" with no way for the user to tell the difference. Keep the
                 // button usable and surface the hint instead of gating on it.
                 binding.btnFixPlayback.isEnabled = true
+                // One assignment. A second, shorter one used to follow immediately
+                // below and silently clobber this, so the "didn't advertise support"
+                // hint could never appear.
                 binding.btnFixPlayback.text = when {
-                    playbackFixed -> "Playback locked"
-                    !swSupported -> "Fix playback (headset didn't advertise support)"
-                    else -> "Fix playback"
+                    playbackFixed -> "Playback locked to this device"
+                    !swSupported -> "Lock playback (headset didn't advertise support)"
+                    else -> "Lock playback to this device"
                 }
                 pairingModeActive = intent.getBooleanExtra(EXTRA_PAIRING_MODE, false)
                 binding.btnPairingMode.text =
                     if (pairingModeActive) "Leave pairing mode" else "Enter pairing mode"
-                binding.btnFixPlayback.text =
-                    if (playbackFixed) "Playback locked" else "Lock playback to this device"
                 binding.textFixPlaybackState.text = when {
                     !peripheralSupported ->
                         "Peripheral/multipoint family not supported on this device"
@@ -1011,38 +1012,57 @@ class MainActivity : AppCompatActivity() {
                 setTextColor(if (isActive) Color.rgb(140, 225, 190) else Color.rgb(230, 230, 230))
             }, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
-            // Unpair removes this device from the headset's paired list entirely.
+            // Status sits on the name line, opposite the name. It used to sit at
+            // the bottom-right with Unpair immediately above it, and the two read
+            // as one control rather than a state and an action.
+            val statusText = when {
+                isActive && playbackFixed -> "Active · locked"
+                isActive -> "Active"
+                else -> "Tap to switch"
+            }
             top.addView(android.widget.TextView(this).apply {
-                text = "Unpair"
-                textSize = 12f
-                setTextColor(Color.rgb(226, 128, 128))
-                setPadding(dp(16), dp(6), dp(8), dp(6))
-                setOnClickListener {
-                    if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
-                    sendToService(ACTION_PAIRED_DEVICE_ACTION) {
-                        putExtra("mac", multiMacs[i])
-                        putExtra("action", SonyMdrV2.CONN_ACTION_UNPAIR)
-                    }
-                    binding.textMultiPointStatus.text = "Unpairing $name…"
-                }
+                text = statusText
+                textSize = 11f
+                setTextColor(
+                    when {
+                        isActive && playbackFixed -> Color.rgb(255, 205, 120)
+                        isActive -> Color.rgb(140, 225, 190)
+                        else -> Color.rgb(110, 110, 110)
+                    },
+                )
             })
             row.addView(top)
 
             val bottom = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, dp(2), 0, 0)
+                setPadding(0, dp(4), 0, 0)
             }
             bottom.addView(android.widget.TextView(this).apply {
                 text = multiMacs[i]
                 textSize = 11f
                 setTextColor(Color.rgb(120, 120, 120))
             }, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            bottom.addView(android.widget.TextView(this).apply {
-                text = if (isActive) "Active" else "Tap to switch"
-                textSize = 11f
-                setTextColor(if (isActive) Color.rgb(140, 225, 190) else Color.rgb(110, 110, 110))
-            })
+
+            // Unpair moved down here so it no longer stacks against the status
+            // label. It is a destructive action on a device that may be the one
+            // currently playing, so it only appears on the inactive row.
+            if (!isActive) {
+                bottom.addView(android.widget.TextView(this).apply {
+                    text = "Unpair"
+                    textSize = 12f
+                    setTextColor(Color.rgb(226, 128, 128))
+                    setPadding(dp(16), dp(4), dp(4), dp(4))
+                    setOnClickListener {
+                        if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+                        sendToService(ACTION_PAIRED_DEVICE_ACTION) {
+                            putExtra("mac", multiMacs[i])
+                            putExtra("action", SonyMdrV2.CONN_ACTION_UNPAIR)
+                        }
+                        binding.textMultiPointStatus.text = "Unpairing $name…"
+                    }
+                })
+            }
             row.addView(bottom)
 
             if (!isActive) {
