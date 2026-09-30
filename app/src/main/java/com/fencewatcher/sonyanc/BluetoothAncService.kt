@@ -110,6 +110,18 @@ class BluetoothAncService : Service() {
      * no delay at all, forever. It now only resets on a successful connect.
      */
     private var connectFailures = 0
+
+    /**
+     * True once a link has been up, cleared when the retry loop gives up.
+     *
+     * This separates "the link dropped" from "the headphones are gone". Both look
+     * identical from the socket -- a write to a half-open connection succeeds, so
+     * the only evidence is silence -- but they deserve opposite pacing. Treating
+     * a dropped link like an absent device meant backing off 3s, 6s, 12s from a
+     * pair that was sitting there answering the first retry, turning a sub-second
+     * outage into a six-second one.
+     */
+    private var everConnected = false
     private var lastConnectAttemptAt = 0L
 
     /**
@@ -570,6 +582,7 @@ class BluetoothAncService : Service() {
                     updateNotification("Connected")
                     currentSeq = 0       // Reset seq on every fresh connection
                     connectFailures = 0   // Reset the failure count on success
+                    everConnected = true
 
                     // The read loop has to be running before the handshake: request()
                     // waits for a reply, and with nothing draining the socket every
@@ -700,7 +713,12 @@ class BluetoothAncService : Service() {
                     if (!isActive) break
 
                     connectFailures++
-                    val delay = RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
+                    // A pair that was reachable moments ago is present, not absent.
+                    // Retry promptly for the first few attempts, then fall back to
+                    // the normal backoff so a genuinely powered-off pair is not
+                    // hammered -- the loop gives up on its own after this.
+                    val delay = if (everConnected && connectFailures <= 3) 800L
+                    else RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
                     updateNotification("Reconnecting in ${delay / 1000}s…")
                     delay(delay)
                 }
@@ -715,6 +733,9 @@ class BluetoothAncService : Service() {
                 // Not a fault: most often the headphones are simply powered off.
                 // Waiting for the Bluetooth profile to report them back beats
                 // hammering the stack every few seconds.
+                // The retry budget is spent, so the next round starts from the
+                // absent-device pacing rather than the dropped-link pacing.
+                everConnected = false
                 broadcastStatus(status, "Headphones off — waiting")
                 updateNotification("Headphones off — waiting")
             }
