@@ -557,7 +557,10 @@ class BluetoothAncService : Service() {
                     } catch (_: Exception) {}
 
                     // Try multiple connection methods — Sony RFCOMM is finicky
-                    val socket = createSonyRfcommSocket(device)
+                    if (!awaitProfileReady(device)) {
+                        Log.d(tag, "Profile not ready after wait — trying anyway")
+                    }
+                    val socket = connectSonyRfcomm(device)
                     btSocket = socket
                     socket.connect()
 
@@ -1160,44 +1163,115 @@ class BluetoothAncService : Service() {
     // ---- Bluetooth connection helpers ----
 
     /**
-     * Tries several RFCOMM socket-creation strategies.
-     * Sony's UUID is often missing from the device SDP record on Android,
-     * so we fall back to reflection-based channel 1.
+     * Drives every RFCOMM strategy through to an actual connect.
+     *
+     * Both socket factories only build a socket object: neither proves the
+     * channel exists and neither throws when it does not. The previous version
+     * returned on the first socket that was merely *created*, which made the
+     * channel fallback unreachable — channel 1 always won and the real failure
+     * only appeared later at connect(). The log compounded it by reporting
+     * "Socket created via UUID …" for sockets that were never connectable.
+     *
+     * Every strategy is now carried through to connect() and the failed socket
+     * closed before the next is tried, so a device that answers on channel 10 is
+     * actually reached instead of looping on channel 1 forever.
      */
-    private fun createSonyRfcommSocket(device: BluetoothDevice): BluetoothSocket {
-        // Try known Sony service UUIDs (in order: XM6, XM5) first
+    private fun connectSonyRfcomm(device: BluetoothDevice): BluetoothSocket {
+        val failures = mutableListOf<String>()
+
         for (uuidStr in HeadphoneProfile.allUuids) {
             val uuid = UUID.fromString(uuidStr)
-            try {
-                val s = device.createRfcommSocketToServiceRecord(uuid)
-                Log.d(tag, "Socket created via UUID $uuidStr")
-                return s
-            } catch (e: IOException) {
-                Log.d(tag, "UUID $uuidStr failed: ${e.message}")
-            }
-            try {
-                val s = device.createInsecureRfcommSocketToServiceRecord(uuid)
-                Log.d(tag, "Socket created via insecure UUID")
-                return s
-            } catch (e: IOException) {
-                Log.d(tag, "Insecure UUID $uuidStr failed: ${e.message}")
+            for (secure in listOf(true, false)) {
+                val label = (if (secure) "" else "insecure ") + uuidStr
+                val socket = try {
+                    if (secure) device.createRfcommSocketToServiceRecord(uuid)
+                    else device.createInsecureRfcommSocketToServiceRecord(uuid)
+                } catch (e: IOException) {
+                    failures += "create $label: ${e.message}"
+                    continue
+                }
+                try {
+                    socket.connect()
+                    Log.d(tag, "Connected via UUID $label")
+                    return socket
+                } catch (e: IOException) {
+                    runCatching { socket.close() }
+                    failures += "connect $label: ${e.message}"
+                    Log.d(tag, "UUID $label would not connect: ${e.message}")
+                }
             }
         }
 
-        // Fallback: reflection with channel 1, 10, etc.
+        // Channel fallback. createRfcommSocket() cannot fail here, so connecting
+        // is the only way to learn whether a channel is real.
         val channels = intArrayOf(1, 10, 2, 3, 5, 15, 20)
+        val createCh = try {
+            device.javaClass.getMethod("createRfcommSocket", Int::class.java)
+        } catch (e: Exception) {
+            throw IOException("No reflection fallback available: ${e.message}", e)
+        }
         for (ch in channels) {
-            try {
-                val method = device.javaClass.getMethod("createRfcommSocket", Int::class.java)
-                val s = method.invoke(device, ch) as BluetoothSocket
-                Log.d(tag, "Socket created via reflection (channel $ch)")
-                return s
+            val socket = try {
+                createCh.invoke(device, ch) as BluetoothSocket
             } catch (e: Exception) {
-                Log.d(tag, "Reflection channel-$ch failed: ${e.message}")
+                failures += "create channel $ch: ${e.message}"
+                continue
+            }
+            try {
+                socket.connect()
+                Log.d(tag, "Connected via reflection channel $ch")
+                return socket
+            } catch (e: IOException) {
+                runCatching { socket.close() }
+                failures += "connect channel $ch: ${e.message}"
+                Log.d(tag, "Channel $ch would not connect: ${e.message}")
             }
         }
 
-        throw IOException("All RFCOMM socket strategies failed")
+        throw IOException("All RFCOMM strategies failed — ${failures.joinToString("; ")}")
+    }
+
+    /**
+     * Waits for the Bluetooth profile to report the device connected.
+     *
+     * ACL being up does not mean the RFCOMM channel is registered yet, and Sony
+     * headphones are prone to refusing a socket connect in that window. The
+     * profile query is reflective because the two-argument
+     * getProfileConnectionState is not in this SDK's stubs. If it cannot be
+     * reached at all the wait degrades to a plain settle, so the behaviour is
+     * never worse than not having it.
+     */
+    private suspend fun awaitProfileReady(device: BluetoothDevice, timeoutMs: Long = 4_000L): Boolean {
+        val adapter = BluetoothAdapter.getDefaultAdapter() ?: return true
+        val method = try {
+            adapter.javaClass.getMethod(
+                "getProfileConnectionState",
+                BluetoothDevice::class.java,
+                Int::class.javaPrimitiveType!!,
+            )
+        } catch (_: Exception) {
+            Log.d(tag, "Profile query unavailable — settling briefly instead")
+            delay(400L)
+            return true
+        }
+        val profiles = intArrayOf(
+            android.bluetooth.BluetoothProfile.HEADSET,
+            android.bluetooth.BluetoothProfile.A2DP,
+        )
+        val connected = android.bluetooth.BluetoothProfile.STATE_CONNECTED
+        val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val ready = profiles.any { p ->
+                try {
+                    method.invoke(adapter, device, p) == connected
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (ready) return true
+            delay(150L)
+        }
+        return false
     }
 
     // ---- Media playback callback ----
