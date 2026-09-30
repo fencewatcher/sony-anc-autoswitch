@@ -790,22 +790,48 @@ class MainActivity : AppCompatActivity() {
             })
             return
         }
+        // Rule id -> row, so a drag can move the live view rather than rebuilding
+        // the list underneath itself. Re-rendering mid-drag destroys the view
+        // being dragged and the gesture stalls.
+        val rowsById = mutableMapOf<String, android.view.View>()
+
         automationRules.forEachIndexed { index, rule ->
             val row = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(0, 10, 0, 10)
+                setPadding(0, dp(8), 0, dp(8))
                 isClickable = true
                 setBackgroundColor(if (rule.enabled) 0x22334466 else 0x00000000)
             }
-            // Order is the rule's behaviour, not decoration — the first match wins.
-            row.addView(android.widget.TextView(this).apply {
+            rowsById[rule.id] = row
+
+            // Order is the rule's behaviour, not decoration — the first match wins —
+            // so it needs a handle that can be grabbed, and a number that shows
+            // where the rule currently sits.
+            val handle = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                gravity = android.view.Gravity.CENTER
+                setPadding(dp(10), dp(6), dp(6), dp(6))
+                contentDescription = "Reorder rule ${index + 1}"
+                setOnLongClickListener { v ->
+                    val clip = android.content.ClipData.newPlainText("rule", rule.id)
+                    v.startDragAndDrop(clip, android.view.View.DragShadowBuilder(v), rule.id, 0)
+                    true
+                }
+            }
+            handle.addView(android.widget.TextView(this).apply {
+                text = "≡"
+                textSize = 18f
+                setTextColor(if (rule.enabled) Color.rgb(127, 212, 168) else Color.rgb(110, 110, 110))
+            })
+            handle.addView(android.widget.TextView(this).apply {
                 text = "${index + 1}"
-                textSize = 12f
+                textSize = 11f
                 gravity = android.view.Gravity.CENTER
                 setTextColor(if (rule.enabled) Color.rgb(127, 212, 168) else Color.rgb(110, 110, 110))
-                setPadding(0, 0, 10, 0)
             })
+            row.addView(handle)
+
             val labels = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.VERTICAL
             }
@@ -821,6 +847,31 @@ class MainActivity : AppCompatActivity() {
             })
             row.addView(labels, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
+            // Delete is an explicit, labelled control. It used to be a long-press
+            // on the row, which is the same gesture that starts a drag, so the
+            // first attempt to reorder silently destroyed a rule. Nothing this
+            // destructive should be reachable by accident.
+            row.addView(android.widget.TextView(this).apply {
+                text = "✕"
+                textSize = 15f
+                gravity = android.view.Gravity.CENTER
+                setTextColor(Color.rgb(226, 128, 128))
+                setPadding(dp(14), dp(8), dp(10), dp(8))
+                contentDescription = "Delete rule ${index + 1}"
+                setOnClickListener {
+                    val name = rule.trigger.label
+                    android.app.AlertDialog.Builder(this@MainActivity)
+                        .setMessage("Delete \"$name\"?")
+                        .setPositiveButton("Delete") { _, _ ->
+                            automationRules = automationRules.filterNot { it.id == rule.id }
+                            saveAutomation()
+                            renderAutomation()
+                        }
+                        .setNegativeButton("Cancel", null)
+                        .show()
+                }
+            })
+
             val toggle = android.widget.Switch(this).apply {
                 isChecked = rule.enabled
                 setOnCheckedChangeListener { _, checked ->
@@ -832,11 +883,36 @@ class MainActivity : AppCompatActivity() {
             }
             row.addView(toggle)
             row.setOnClickListener { showRuleEditor(index) }
-            row.setOnLongClickListener {
-                automationRules = automationRules.filterIndexed { i, _ -> i != index }
-                saveAutomation()
-                true
+
+            // Reorder as the row is entered, so the list follows the finger, and
+            // only the final position is written to storage.
+            row.setOnDragListener { _, ev ->
+                when (ev.action) {
+                    android.view.DragEvent.ACTION_DRAG_STARTED ->
+                        ev.clipDescription?.hasMimeType("text/plain") == true
+                    android.view.DragEvent.ACTION_DRAG_ENTERED -> {
+                        val id = ev.clipData?.getItemAt(0)?.text?.toString()
+                        val from = automationRules.indexOfFirst { it.id == id }
+                        if (id != null && from >= 0 && from != index) {
+                            automationRules = automationRules.toMutableList().also {
+                                it.add(index, it.removeAt(from))
+                            }
+                            rowsById[id]?.let { moved ->
+                                box.removeView(moved)
+                                box.addView(moved, index)
+                            }
+                        }
+                        true
+                    }
+                    android.view.DragEvent.ACTION_DROP, android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                        saveAutomation()
+                        renderAutomation()
+                        true
+                    }
+                    else -> true
+                }
             }
+
             box.addView(row, android.widget.LinearLayout.LayoutParams(
                 android.widget.LinearLayout.LayoutParams.MATCH_PARENT,
                 android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -848,10 +924,10 @@ class MainActivity : AppCompatActivity() {
         }
         if (automationRules.isNotEmpty()) {
             box.addView(android.widget.TextView(this).apply {
-                text = "Tap a rule to edit it · long-press to delete · order matters, first match wins"
+                text = "Tap to edit · hold ⠿ to reorder · order matters, first match wins"
                 textSize = 11f
                 setTextColor(Color.rgb(110, 110, 110))
-                setPadding(4, 12, 0, 0)
+                setPadding(dp(4), dp(12), 0, 0)
             })
         }
     }
@@ -866,6 +942,7 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.NONE,
             Automation.ActionType.SET_MODE,
             Automation.ActionType.SET_AMBIENT_LEVEL,
+            Automation.ActionType.SET_VOLUME,
             Automation.ActionType.SET_EQ_PRESET,
             Automation.ActionType.SET_SPEAK_TO_CHAT,
             Automation.ActionType.SET_PAUSE_TAKEN_OFF,
@@ -884,7 +961,12 @@ class MainActivity : AppCompatActivity() {
             orientation = android.widget.LinearLayout.VERTICAL
             setPadding(48, 32, 48, 8)
         }
-        fun <T> spinner(items: List<T>, selected: Int): android.widget.Spinner {
+        fun <T> spinner(caption: String, items: List<T>, selected: Int): android.widget.Spinner {
+            linear.addView(android.widget.TextView(this).apply {
+                text = caption
+                textSize = 11f
+                setTextColor(Color.rgb(150, 150, 150))
+            })
             val sp = android.widget.Spinner(this)
             sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
                 it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -894,9 +976,16 @@ class MainActivity : AppCompatActivity() {
             return sp
         }
 
-        val whenSp = spinner(triggers.map { it.label }, triggers.indexOf(base.trigger))
-        val doSp = spinner(actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
-        val valueSp = android.widget.Spinner(this).also { linear.addView(it) }
+        val whenSp = spinner("When", triggers.map { it.label }, triggers.indexOf(base.trigger))
+        val doSp = spinner("Do", actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
+        val valueSp = android.widget.Spinner(this).also {
+            linear.addView(android.widget.TextView(this).apply {
+                text = "Value"
+                textSize = 11f
+                setTextColor(Color.rgb(150, 150, 150))
+            })
+            linear.addView(it)
+        }
 
         val levelOptions = listOf(5, 10, 15, 20)
         val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
@@ -912,6 +1001,7 @@ class MainActivity : AppCompatActivity() {
                 type == Automation.ActionType.SET_VOICE_GUIDANCE -> levelOptions.map { "$it" }
                 type == Automation.ActionType.SET_MODE -> Automation.Mode.values().map { it.label }
                 type == Automation.ActionType.SET_AMBIENT_LEVEL -> levelOptions.map { "$it" }
+                type == Automation.ActionType.SET_VOLUME -> levelOptions.map { "$it" }
                 type == Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
                 else -> emptyList()
             }
@@ -932,45 +1022,83 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.SET_AUTO_POWER ->
                 Automation.AutoPower.values().indexOf(base.action.power).coerceAtLeast(0)
             Automation.ActionType.SET_AMBIENT_LEVEL,
+            Automation.ActionType.SET_VOLUME,
             Automation.ActionType.SET_VOICE_GUIDANCE ->
                 levelOptions.indexOf(base.action.value).let { if (it < 0) 1 else it }
             in Automation.ActionType.TOGGLES -> if (base.action.value != 0) 0 else 1
             else -> 0
         })
 
+        /**
+         * The action the three spinners currently describe.
+         *
+         * Used by both the live preview and the save handler. Keeping one builder
+         * means the sentence shown while editing is the sentence that gets stored
+         * -- a preview assembled by a second, near-identical `when` would drift
+         * from the rule it claims to describe, which is exactly how the EQ screen
+         * came to read a preset correctly while gating on a different one.
+         */
+        fun currentAction(): Automation.Action {
+            val type = actionTypes[doSp.selectedItemPosition]
+            val pos = valueSp.selectedItemPosition
+            return when (type) {
+                Automation.ActionType.SET_MODE -> Automation.Action(
+                    type = type,
+                    mode = Automation.Mode.values().getOrElse(pos) { Automation.Mode.NC },
+                )
+                Automation.ActionType.SET_AMBIENT_LEVEL,
+                Automation.ActionType.SET_VOLUME,
+                Automation.ActionType.SET_VOICE_GUIDANCE ->
+                    Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
+                Automation.ActionType.SET_EQ_PRESET ->
+                    Automation.Action(type = type, presetId = eqIds.getOrElse(pos) { 0x30 })
+                Automation.ActionType.SET_AUTO_POWER -> Automation.Action(
+                    type = type,
+                    power = Automation.AutoPower.values().getOrElse(pos) { Automation.AutoPower.WHEN_TAKEN_OFF },
+                )
+                in Automation.ActionType.TOGGLES ->
+                    Automation.Action(type = type, value = if (pos == 0) 1 else 0)
+                else -> Automation.Action(type = type)
+            }
+        }
+
+        val preview = android.widget.TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.rgb(127, 212, 168))
+            setPadding(0, 16, 0, 4)
+        }
+        linear.addView(preview)
+        fun refreshPreview() {
+            val trigger = triggers[whenSp.selectedItemPosition]
+            preview.text = "When ${trigger.label.lowercase()}, " +
+                Automation.describe(
+                    base.copy(trigger = trigger, action = currentAction()),
+                )
+        }
         doSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
                 fillValues(actionTypes[pos], 1)
+                refreshPreview()
             }
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
+        listOf(whenSp, valueSp).forEach { sp ->
+            sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
+                    refreshPreview()
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+        }
+        refreshPreview()
 
         val dialog = android.app.AlertDialog.Builder(this)
             .setTitle(if (existingIndex == null) "New rule" else "Edit rule")
             .setView(linear)
             .setPositiveButton("Save") { _, _ ->
-                val type = actionTypes[doSp.selectedItemPosition]
-                val pos = valueSp.selectedItemPosition
-                val action = when (type) {
-                    Automation.ActionType.SET_MODE -> Automation.Action(
-                        type = type,
-                        mode = Automation.Mode.values().getOrElse(pos) { Automation.Mode.NC },
-                    )
-                    Automation.ActionType.SET_AMBIENT_LEVEL ->
-                        Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
-                    Automation.ActionType.SET_VOICE_GUIDANCE ->
-                        Automation.Action(type = type, value = levelOptions.getOrElse(pos) { 10 })
-                    Automation.ActionType.SET_EQ_PRESET ->
-                        Automation.Action(type = type, presetId = eqIds.getOrElse(pos) { 0x30 })
-                    Automation.ActionType.SET_AUTO_POWER -> Automation.Action(
-                        type = type,
-                        power = Automation.AutoPower.values().getOrElse(pos) { Automation.AutoPower.WHEN_TAKEN_OFF },
-                    )
-                    in Automation.ActionType.TOGGLES ->
-                        Automation.Action(type = type, value = if (pos == 0) 1 else 0)
-                    else -> Automation.Action(type = type)
-                }
-                val rule = base.copy(trigger = triggers[whenSp.selectedItemPosition], action = action)
+                val rule = base.copy(
+                    trigger = triggers[whenSp.selectedItemPosition],
+                    action = currentAction(),
+                )
                 automationRules = if (existingIndex == null) {
                     automationRules + rule
                 } else {
