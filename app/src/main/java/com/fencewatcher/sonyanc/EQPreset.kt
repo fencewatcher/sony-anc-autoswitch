@@ -17,5 +17,12 @@ enum class EQPreset(val id: Int, val displayName: String) {
     companion object {
         fun fromId(id: Int): EQPreset =
             entries.firstOrNull { it.id == id } ?: OFF
+
+        /**
+         * Only the Custom and User slots hold a curve that can be written back;
+         * the Sony presets are fixed. The split is the 0xA0 boundary, which is
+         * why it is expressed as a range rather than a list of names.
+         */
+        fun isEditable(id: Int): Boolean = id >= CUSTOM.id
     }
 }

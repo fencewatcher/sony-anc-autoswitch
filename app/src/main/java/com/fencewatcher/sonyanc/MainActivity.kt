@@ -230,25 +230,6 @@ class MainActivity : AppCompatActivity() {
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
 
-    /** Outcome of the last source switch, from the headset's own reply. */
-    private var multiStatus: String = ""
-
-    /**
-     * Name shown in a provisional "Switching to …" line, and the runnable that
-     * takes it away again.
-     *
-     * The line is a placeholder while a switch is in flight. If no reply ever
-     * arrives -- the headset drops the request, or the socket is mid-teardown --
-     * nothing was ever going to clear it, so the row sat claiming a switch was in
-     * progress indefinitely and a refusal was indistinguishable from a switch that
-     * merely had not finished. A deadline restores the honest line.
-     */
-    private var pendingSwitchTarget: String? = null
-    private val clearPendingSwitch = Runnable {
-        pendingSwitchTarget = null
-        binding.textMultiPointStatus.text = currentMultiPointSummary()
-    }
-
     /** Guards switch/spinner listeners while we push service state into the UI. */
     private var updatingUi = false
     private var autoPowerSpinnerReady = false
@@ -284,11 +265,22 @@ class MainActivity : AppCompatActivity() {
                 eqActivePreset = intent.getIntExtra(EXTRA_EQ_ACTIVE_PRESET, 0)
                 eqActiveBands = intent.getIntArrayExtra(EXTRA_EQ_ACTIVE_BANDS)
                 updateEQStatus()
-                // Sync graph view
-                val src = eqActiveBands
-                if (src != null && src.size == 10) {
-                    for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
-                    binding.eqGraph.bandValues = eqBandValues
+                // Gate editing on the preset the headset actually has selected.
+                // The graph view defaults to interactive and nothing called
+                // selectPreset() at startup, so on a cold launch the curve could be
+                // dragged even when the live preset was one of Sony's fixed ones,
+                // and dragging a preset that cannot be written is a no-op the user
+                // cannot see the reason for.
+                val editable = EQPreset.isEditable(eqActivePreset)
+                binding.eqGraph.interactive = editable
+                binding.btnApplyCustomEQ.visibility =
+                    if (editable) View.VISIBLE else View.GONE
+                if (editable) {
+                    val src = eqActiveBands
+                    if (src != null && src.size == 10) {
+                        for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
+                        binding.eqGraph.bandValues = eqBandValues
+                    }
                 }
             }
 
@@ -321,19 +313,6 @@ class MainActivity : AppCompatActivity() {
 
             if (intent?.hasExtra(EXTRA_UPSCALING_EFFECT) == true) {
                 upscalingEffect = intent.getIntExtra(EXTRA_UPSCALING_EFFECT, 0xFF)
-                markRenderDirty()
-            }
-
-            // Read the switch outcome outside the peripheral guard. It used to sit
-            // inside it, so a broadcast carrying only the outcome left the row
-            // saying "Switching to …" for good -- including when that outcome was a
-            // refusal, which is exactly what it must never do.
-            if (intent?.hasExtra(EXTRA_MULTI_STATUS) == true) {
-                multiStatus = intent.getStringExtra(EXTRA_MULTI_STATUS) ?: ""
-                pendingSwitchTarget = null
-                // Cancel the fallback too, or it fires later and overwrites the
-                // very result it was standing in for.
-                binding.textMultiPointStatus.removeCallbacks(clearPendingSwitch)
                 markRenderDirty()
             }
 
@@ -1127,13 +1106,6 @@ class MainActivity : AppCompatActivity() {
                 row.setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
                     sendToService(ACTION_SOURCE_SWITCH) { putExtra(EXTRA_TARGET_MAC, multiMacs[i]) }
-                    // Provisional, and on a deadline. The headset's own answer
-                    // replaces it; if none arrives the deadline restores the
-                    // standing line so this cannot outlive the request.
-                    pendingSwitchTarget = name
-                    binding.textMultiPointStatus.text = "Switching to $name…"
-                    binding.textMultiPointStatus.removeCallbacks(clearPendingSwitch)
-                    binding.textMultiPointStatus.postDelayed(clearPendingSwitch, 6_000L)
                 }
             }
             box.addView(row, android.widget.LinearLayout.LayoutParams(
@@ -1145,24 +1117,11 @@ class MainActivity : AppCompatActivity() {
                 if (i > 0) topMargin = dp(8)
             })
         }
-        val activeName = multiMacs.indices.firstOrNull { multiActive.getOrElse(it) { false } }
-            ?.let { multiNames.getOrNull(it) }
-        // A refusal or confirmation from the headset outranks the generic summary.
-        // This line used to be rebuilt from the list alone on every render, so a
-        // switch result was overwritten the instant the list came back.
-        binding.textMultiPointStatus.text = when {
-            multiStatus.isNotBlank() -> multiStatus
-            else -> currentMultiPointSummary()
-        }
-    }
-
-    /** The standing description of the multipoint list, ignoring switch outcomes. */
-    private fun currentMultiPointSummary(): String {
-        val activeName = multiMacs.indices.firstOrNull { multiActive.getOrElse(it) { false } }
-            ?.let { multiNames.getOrNull(it) }
-        return if (activeName != null)
-            "Playing from: $activeName — tap another to switch"
-        else "Tap a device to switch audio source"
+        // No status line under the list. It spent its life as a switch message --
+        // "Switching to …", then "Switched to …" -- which restated what the rows
+        // already show, and whose "Switching to …" state had to be given a
+        // deadline to stop outliving its own request. The rows carry the state.
+        binding.textMultiPointStatus.text = ""
     }
 
     private fun renderFeatureSwitches() {
