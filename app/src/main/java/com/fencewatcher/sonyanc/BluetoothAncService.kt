@@ -35,12 +35,15 @@ class BluetoothAncService : Service() {
     private var btSocket: BluetoothSocket? = null
     private var mediaMonitor: MediaPlaybackMonitor? = null
     /**
-     * T1 and T2 are separate channels and the device keeps a sequence per table,
-     * so one shared counter let a T1 frame take the number a T2 frame had just
-     * used. Two counters, matching the two tables.
+     * One outgoing sequence counter, shared across both tables.
+     *
+     * It was briefly split into one counter per table on the reasoning that a T1
+     * frame could take the number a T2 frame had just used. The app's own sender
+     * (ie0/c.java) keeps a single byte and passes it for every data type inside
+     * one synchronized method, so the shared behaviour is the correct one -- the
+     * observed alternation across tables is simply what it produces.
      */
-    private var seqT1 = 0
-    private var seqT2 = 0
+    private var currentSeq = 0
 
     private class PendingRequest(
         val replyCommand: Int,
@@ -562,8 +565,7 @@ class BluetoothAncService : Service() {
                     status = Status.CONNECTED
                     broadcastStatus(status, "Connected")
                     updateNotification("Connected")
-                    seqT1 = 0            // Reset seq on every fresh connection
-                    seqT2 = 0
+                    currentSeq = 0       // Reset seq on every fresh connection
                     connectFailures = 0   // Reset the failure count on success
 
                     // The read loop has to be running before the handshake: request()
@@ -999,18 +1001,6 @@ class BluetoothAncService : Service() {
                         type == SonyMdrV2.T2_TYPE_WEARING_STATUS_CHECKER && p.size >= 3 ->
                         applyWearCode(p[2].toInt() and 0xFF)
 
-                    // LE Audio transport, T1: [0xF3, 0x05, leFlag, classicFlag].
-                    table == SonyMdrV2.Table.T1 &&
-                        type == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO && p.size >= 4 -> {
-                        val le = SonyMdrV2.decodeInvertedEnable(p[2].toInt() and 0xFF)
-                        val classic = SonyMdrV2.decodeInvertedEnable(p[3].toInt() and 0xFF)
-                        if (le != null && le != leAudioActive) {
-                            leAudioActive = le
-                            Log.d(tag, "LE Audio: $le (classic: $classic)")
-                            broadcastStats()
-                        }
-                    }
-
                     // Quick Access master enable, T1: [0xF3, 0x0D, enable].
                     table == SonyMdrV2.Table.T1 &&
                         type == SonyMdrV2.SYS_TYPE_QUICK_ACCESS && p.size >= 3 -> {
@@ -1046,10 +1036,27 @@ class BluetoothAncService : Service() {
             // is deliberately not read: on the XM6 it reports inactive while the
             // codec read simultaneously reports LDAC, so its field position is not
             // established and it cannot be trusted. LDAC is derived from the codec.
+            // AUDIO_RET_STATUS. Type 0x02 is the connection mode, type 0x05 the
+            // LE Audio / Classic transport. Both are AUDIO-group types: querying
+            // 0x05 through the SYSTEM group returns wake-word status instead,
+            // because that byte is also VOICE_ASSISTANT_WAKE_WORD in
+            // SystemInquiredType.
             SonyMdrV2.CMD_AUDIO_RET_STATUS -> {
-                if (p.size >= 4 && (p[1].toInt() and 0xFF) == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6) {
-                    Log.d(tag, "Connection mode status: ${SonyMdrV2.hex(p.copyOfRange(2, p.size))}")
-                    broadcastStats()
+                val atype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
+                when {
+                    atype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO && p.size >= 4 -> {
+                        val le = SonyMdrV2.decodeInvertedEnable(p[2].toInt() and 0xFF)
+                        val classic = SonyMdrV2.decodeInvertedEnable(p[3].toInt() and 0xFF)
+                        if (le != null && le != leAudioActive) {
+                            leAudioActive = le
+                            Log.d(tag, "LE Audio: $le (classic: $classic)")
+                            broadcastStats()
+                        }
+                    }
+                    atype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6 -> {
+                        Log.d(tag, "Connection mode status: ${SonyMdrV2.hex(p.copyOfRange(2, p.size))}")
+                        broadcastStats()
+                    }
                 }
             }
 
@@ -1334,13 +1341,12 @@ class BluetoothAncService : Service() {
     private fun sendFrame(payload: ByteArray, table: SonyMdrV2.Table = SonyMdrV2.Table.T1) {
         val socket = btSocket ?: return
         try {
-            val seq = if (table == SonyMdrV2.Table.T2) seqT2 else seqT1
-            val frame = SonyMdrV2.buildFrame(seq, payload, table)
+            val frame = SonyMdrV2.buildFrame(currentSeq, payload, table)
             socket.outputStream.write(frame)
             socket.outputStream.flush()
-            Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$seq")
-            recordFrame("TX", if (table == SonyMdrV2.Table.T2) "T2" else "T1", payload, seq)
-            if (table == SonyMdrV2.Table.T2) seqT2 = seq xor 1 else seqT1 = seq xor 1
+            Log.d(tag, "→ [${if (table == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(payload)} seq=$currentSeq")
+            recordFrame("TX", if (table == SonyMdrV2.Table.T2) "T2" else "T1", payload, currentSeq)
+            currentSeq = currentSeq xor 1
 
             // Track the mode we last commanded (for notification stats)
             if (payload.isNotEmpty() && (payload[0].toInt() and 0xFF) == SonyMdrV2.CMD_NCASM_SET_PARAM) {

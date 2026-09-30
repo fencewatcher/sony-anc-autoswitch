@@ -329,8 +329,18 @@ object SonyMdrV2 {
     const val AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO = 0x05
     const val CMD_SYSTEM_GET_STATUS_T1 = 0xF2
 
+    /**
+     * LE Audio / Classic transport status -- **e2 05**, not f2 05.
+     *
+     * Type 0x05 exists in two enums. In SystemInquiredType it is
+     * VOICE_ASSISTANT_WAKE_WORD, so a SYSTEM query (0xf2) carrying this byte asks
+     * for the wake-word status and is answered with f3 05. The transport lives in
+     * AudioInquiredType as CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO, which is an
+     * AUDIO-group command: query 0xe2, reply 0xe3. The set side was already
+     * correct at 0xe8; only the read was in the wrong group.
+     */
     fun buildLeAudioStatusGet(): ByteArray =
-        byteArrayOf(CMD_SYSTEM_GET_STATUS_T1.toByte(), AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO.toByte())
+        byteArrayOf(CMD_AUDIO_GET_STATUS.toByte(), AUDIO_TYPE_CONNECTION_MODE_LE_AUDIO.toByte())
 
     /**
      * Switching transport forces the headphones to drop the Bluetooth link, so
