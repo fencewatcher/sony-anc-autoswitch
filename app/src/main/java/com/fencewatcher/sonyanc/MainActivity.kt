@@ -44,6 +44,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_BANDS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PERIPHERAL_OK
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_LIST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_MACS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MULTI_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_ACTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SPEAK_TO_CHAT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_OFF
@@ -229,6 +230,9 @@ class MainActivity : AppCompatActivity() {
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
 
+    /** Outcome of the last source switch, from the headset's own reply. */
+    private var multiStatus: String = ""
+
     /** Guards switch/spinner listeners while we push service state into the UI. */
     private var updatingUi = false
     private var autoPowerSpinnerReady = false
@@ -312,6 +316,7 @@ class MainActivity : AppCompatActivity() {
                     multiMacs = intent.getStringArrayExtra(EXTRA_DEVICE_MACS) ?: emptyArray()
                     multiActive = intent.getBooleanArrayExtra(EXTRA_DEVICE_ACTIVE) ?: BooleanArray(0)
                 }
+                multiStatus = intent.getStringExtra(EXTRA_MULTI_STATUS) ?: ""
                 speakToChat = intent.getBooleanExtra(EXTRA_SPEAK_TO_CHAT, false)
                 pauseWhenTakenOff = intent.getBooleanExtra(EXTRA_PAUSE_TAKEN_OFF, false)
                 dseeExtreme = intent.getBooleanExtra(EXTRA_DSEE, false)
@@ -504,12 +509,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         // ---- Multipoint: lock playback + pairing mode ----
+        // The lock applies to whichever device is playing, so its control now
+        // lives on that device's row (see renderMultiPoint). The large standalone
+        // button is hidden rather than removed so the wiring stays in one place.
         binding.btnFixPlayback.setOnClickListener {
             if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
             val next = !playbackFixed
             sendToService(ACTION_SET_FIX_PLAYBACK) { putExtra("fix", next) }
             toast(if (next) "Locking playback to this device" else "Playback lock released")
         }
+        binding.btnFixPlayback.visibility = android.view.View.GONE
 
         binding.btnPairingMode.setOnClickListener {
             if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
@@ -1062,6 +1071,27 @@ class MainActivity : AppCompatActivity() {
                         binding.textMultiPointStatus.text = "Unpairing $name…"
                     }
                 })
+            } else {
+                // The playback lock belongs to the device that is playing, so its
+                // control sits on that device's row instead of in a large separate
+                // button that could not say which device it would lock.
+                bottom.addView(android.widget.TextView(this).apply {
+                    text = if (playbackFixed) "🔒 Unlock" else "🔒 Lock here"
+                    textSize = 12f
+                    setTextColor(
+                        if (playbackFixed) Color.rgb(255, 205, 120) else Color.rgb(150, 190, 230),
+                    )
+                    setPadding(dp(16), dp(4), dp(4), dp(4))
+                    setOnClickListener {
+                        if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
+                        val next = !playbackFixed
+                        sendToService(ACTION_SET_FIX_PLAYBACK) { putExtra("fix", next) }
+                        toast(
+                            if (next) "Playback locked to $name"
+                            else "Playback lock released",
+                        )
+                    }
+                })
             }
             row.addView(bottom)
 
@@ -1083,9 +1113,14 @@ class MainActivity : AppCompatActivity() {
         }
         val activeName = multiMacs.indices.firstOrNull { multiActive.getOrElse(it) { false } }
             ?.let { multiNames.getOrNull(it) }
-        binding.textMultiPointStatus.text = if (activeName != null)
-            "Playing from: $activeName — tap another to switch"
-        else "Tap a device to switch audio source"
+        // A refusal or confirmation from the headset outranks the generic summary.
+        // This line used to be rebuilt from the list alone on every render, so a
+        // switch result was overwritten the instant the list came back.
+        binding.textMultiPointStatus.text = when {
+            multiStatus.isNotBlank() -> multiStatus
+            activeName != null -> "Playing from: $activeName — tap another to switch"
+            else -> "Tap a device to switch audio source"
+        }
     }
 
     private fun renderFeatureSwitches() {

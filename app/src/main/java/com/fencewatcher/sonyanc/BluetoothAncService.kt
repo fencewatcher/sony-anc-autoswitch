@@ -851,14 +851,25 @@ class BluetoothAncService : Service() {
                 if (res != null) {
                     val ok = res.first == SonyMdrV2.SOURCE_SWITCH_SUCCESS
                     val target = res.second
-                    Log.d(tag, "Source switch ${if (ok) "OK" else "FAILED(0x%02x)".format(res.first)} → $target")
-                    // On this protocol the playback device is reported here, as the
-                    // target address of the source-switch reply — not as a field in
-                    // the device list. Tracking it is what makes "Fix Playback" mean
-                    // anything: the reference only offers the lock on the device that
-                    // is currently playing.
-                    if (target.isNotBlank()) playbackDeviceMac = target
-                    if (ok) scope.launch { refreshMultipoint() }
+                    val name = connectedDevices.firstOrNull { it.mac == target }?.name ?: target
+                    if (ok) {
+                        if (target.isNotBlank()) playbackDeviceMac = target
+                        multiStatus = "Switched to $name"
+                        scope.launch { refreshMultipoint() }
+                    } else {
+                        // The refusal code is the whole answer to "why can't I
+                        // switch", and it used to be logged and then dropped on the
+                        // floor: the row said "Switching to X…" forever with no
+                        // indication the headset had already said no. The most
+                        // common cause seen so far is a target that is paired but
+                        // not connected -- it reports status=0 in the device list.
+                        multiStatus = "Switch to $name refused (0x%02x)%s".format(
+                            res.first,
+                            if (connectedDevices.any { it.mac == target && !it.isConnected })
+                                " — that device isn't connected" else "",
+                        )
+                    }
+                    Log.d(tag, "Source switch $multiStatus")
                     broadcastStats()
                 }
             }
@@ -1863,6 +1874,9 @@ class BluetoothAncService : Service() {
      * source-switch reply. Null until the headset has told us at least once.
      */
     var playbackDeviceMac: String? = null
+
+    /** Outcome of the last source-switch attempt, shown under the device list. */
+    var multiStatus: String = ""
         private set
     var voiceGuidanceVolume: Int = -1
         private set
@@ -1893,6 +1907,7 @@ class BluetoothAncService : Service() {
             if (connectedDevices.isNotEmpty()) {
                 putExtra(EXTRA_DEVICE_LIST, connectedDevices.map { it.name }.toTypedArray())
                 putExtra(EXTRA_DEVICE_MACS, connectedDevices.map { it.mac }.toTypedArray())
+                putExtra(EXTRA_MULTI_STATUS, multiStatus)
                 putExtra(EXTRA_DEVICE_ACTIVE, connectedDevices.map { it.isActive }.toBooleanArray())
             }
             putExtra(EXTRA_PERIPHERAL_OK, peripheralSupported)
@@ -2042,6 +2057,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
         const val EXTRA_EQ_ACTIVE_BANDS = "eq_active_bands"
         const val EXTRA_DEVICE_LIST = "device_list"
+        const val EXTRA_MULTI_STATUS = "multi_status"
         const val EXTRA_DEVICE_MACS = "device_macs"
         const val EXTRA_DEVICE_ACTIVE = "device_active"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
