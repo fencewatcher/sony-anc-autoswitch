@@ -1166,15 +1166,17 @@ class BluetoothAncService : Service() {
      * Drives every RFCOMM strategy through to an actual connect.
      *
      * Both socket factories only build a socket object: neither proves the
-     * channel exists and neither throws when it does not. The previous version
-     * returned on the first socket that was merely *created*, which made the
-     * channel fallback unreachable — channel 1 always won and the real failure
-     * only appeared later at connect(). The log compounded it by reporting
-     * "Socket created via UUID …" for sockets that were never connectable.
+     * channel exists and neither throws when it does not. A previous version
+     * therefore drove every strategy through to connect() in order to "prove"
+     * each one. That was a regression, and an instructive one: the reflection
+     * channel fallback can produce a socket that *connects* without being the
+     * MDR service. The stack accepts it, the handshake never arrives, and the
+     * headphones drop the link immediately — an EOF on the first read, which
+     * looks like a network fault rather than a wrong channel.
      *
-     * Every strategy is now carried through to connect() and the failed socket
-     * closed before the next is tried, so a device that answers on channel 10 is
-     * actually reached instead of looping on channel 1 forever.
+     * So: create-first, as it was. The SDP UUID path is the known-good route and
+     * is used whenever it yields a socket at all. Reflection channels are tried
+     * only when no UUID produces one, which is the case they actually exist for.
      */
     private fun connectSonyRfcomm(device: BluetoothDevice): BluetoothSocket {
         val failures = mutableListOf<String>()
@@ -1183,52 +1185,36 @@ class BluetoothAncService : Service() {
             val uuid = UUID.fromString(uuidStr)
             for (secure in listOf(true, false)) {
                 val label = (if (secure) "" else "insecure ") + uuidStr
-                val socket = try {
-                    if (secure) device.createRfcommSocketToServiceRecord(uuid)
-                    else device.createInsecureRfcommSocketToServiceRecord(uuid)
-                } catch (e: IOException) {
-                    failures += "create $label: ${e.message}"
-                    continue
-                }
                 try {
-                    socket.connect()
-                    Log.d(tag, "Connected via UUID $label")
+                    val socket = if (secure) device.createRfcommSocketToServiceRecord(uuid)
+                    else device.createInsecureRfcommSocketToServiceRecord(uuid)
+                    Log.d(tag, "Using socket from $label")
                     return socket
                 } catch (e: IOException) {
-                    runCatching { socket.close() }
-                    failures += "connect $label: ${e.message}"
-                    Log.d(tag, "UUID $label would not connect: ${e.message}")
+                    failures += "create $label: ${e.message}"
                 }
             }
         }
 
-        // Channel fallback. createRfcommSocket() cannot fail here, so connecting
-        // is the only way to learn whether a channel is real.
+        // No UUID produced a socket. Only now is trying channels safe, because
+        // there is nothing known-good left to prefer.
         val channels = intArrayOf(1, 10, 2, 3, 5, 15, 20)
         val createCh = try {
             device.javaClass.getMethod("createRfcommSocket", Int::class.java)
         } catch (e: Exception) {
-            throw IOException("No reflection fallback available: ${e.message}", e)
+            throw IOException("No RFCOMM strategy available: ${e.message}", e)
         }
         for (ch in channels) {
-            val socket = try {
-                createCh.invoke(device, ch) as BluetoothSocket
+            try {
+                val socket = createCh.invoke(device, ch) as BluetoothSocket
+                Log.d(tag, "Using socket from reflection channel $ch")
+                return socket
             } catch (e: Exception) {
                 failures += "create channel $ch: ${e.message}"
-                continue
-            }
-            try {
-                socket.connect()
-                Log.d(tag, "Connected via reflection channel $ch")
-                return socket
-            } catch (e: IOException) {
-                runCatching { socket.close() }
-                failures += "connect channel $ch: ${e.message}"
-                Log.d(tag, "Channel $ch would not connect: ${e.message}")
             }
         }
 
-        throw IOException("All RFCOMM strategies failed — ${failures.joinToString("; ")}")
+        throw IOException("No RFCOMM socket could be created — ${failures.joinToString("; ")}")
     }
 
     /**
