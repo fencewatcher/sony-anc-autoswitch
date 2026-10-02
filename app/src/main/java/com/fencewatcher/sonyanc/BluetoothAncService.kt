@@ -125,6 +125,44 @@ class BluetoothAncService : Service() {
     private var lastConnectAttemptAt = 0L
 
     /**
+     * When the ACL receiver last triggered a reconnect.
+     *
+     * ACTION_ACL_CONNECTED is not one-per-device-connection. A link that is
+     * flapping, or a phone reconnecting several profiles, delivers it more than
+     * once -- and the receiver used to reset the retry counter on every one, so
+     * each broadcast handed the app a brand new retry budget. That is how an
+     * off pair could be retried indefinitely instead of settling.
+     */
+    private var lastAclReconnectAt = 0L
+
+    /**
+     * The once-a-minute poll that runs after the fast retry burst is spent.
+     *
+     * Exists to prevent a stranded app. ACTION_ACL_CONNECTED fires when the
+     * link comes up, which may be *before* the app starts retrying -- so an
+     * app that gives up while the headphones are already on and ACL-up would
+     * sit there waiting for a broadcast that has already been and gone.
+     */
+    private var slowPollJob: Job? = null
+
+    /**
+     * True while a connect attempt is actually running.
+     *
+     * This exists because of a collision that made first attempts unreliable.
+     * A connect begins by waiting for the Bluetooth profile to report the
+     * device up -- and the broadcast that announces exactly that arrives during
+     * the wait. The receiver treated it as "headphones are back, reconnect",
+     * scheduled a second attempt, and three seconds later that attempt
+     * cancelled the one still handshaking. The device was there the whole time;
+     * the app cancelled itself.
+     *
+     * A live attempt already knows how to find the headphones, so a broadcast
+     * arriving during one is news the attempt does not need.
+     */
+    @Volatile
+    private var connectInProgress = false
+
+    /**
      * Reconnects when the headphones come back at the Bluetooth profile level,
      * so giving up does not mean staying dead until the user presses Start.
      */
@@ -134,6 +172,25 @@ class BluetoothAncService : Service() {
             @Suppress("DEPRECATION")
             val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
             if (dev.address != deviceAddress) return
+            // An attempt is already running and will find the headphones on its
+            // own. Acting on the broadcast would cancel it mid-handshake, which
+            // is precisely the failure this guard exists to stop.
+            if (connectInProgress) {
+                Log.d(tag, "ACL broadcast during a live connect attempt — ignoring")
+                return
+            }
+            // The link can already be up. Reconnecting now would close a
+            // working socket because the profile happened to re-announce.
+            if (btSocket != null && status == Status.CONNECTED) {
+                Log.d(tag, "ACL broadcast for an already-connected link — ignoring")
+                return
+            }
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastAclReconnectAt < ACL_RECONNECT_COOLDOWN_MS) {
+                Log.d(tag, "ACL broadcast within cooldown — ignoring")
+                return
+            }
+            lastAclReconnectAt = now
             connectFailures = 0
             Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
             triggerReconnect()
@@ -517,6 +574,7 @@ class BluetoothAncService : Service() {
         connectionJob = scope.launch {
 
             while (isActive && connectFailures < MAX_RETRIES) {
+                connectInProgress = true
                 try {
                     val adapter = BluetoothAdapter.getDefaultAdapter()
                     if (adapter == null) {
@@ -573,10 +631,18 @@ class BluetoothAncService : Service() {
                         Log.d(tag, "Profile not ready after wait — trying anyway")
                     }
                     val socket = connectSonyRfcomm(device)
-                    btSocket = socket
+                    // Publish only once the channel is actually up. Assigning
+                    // first left a window where a concurrent sender (the 60s
+                    // poll, an ACTION_ intent, a media-state change) could pick
+                    // up a socket that was created but not yet connected, fail
+                    // its write, and take the whole in-flight connect down with
+                    // it -- which is what a lot of "first try" failures were.
                     socket.connect()
+                    btSocket = socket
 
                     Log.d(tag, "Connected!")
+                    slowPollJob?.cancel()
+                    slowPollJob = null
                     status = Status.CONNECTED
                     broadcastStatus(status, "Connected")
                     updateNotification("Connected")
@@ -604,7 +670,7 @@ class BluetoothAncService : Service() {
                                         // with flipped sequence bit, or the XM6 closes the channel.
                                         if (frame.dataType != 0x01) {
                                             val ackSeq = (frame.sequence xor 1) and 0xFF
-                                            sendAck(ackSeq)
+                                            sendAck(socket, ackSeq)
                                             Log.d(tag, "← [${if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1"}] ${SonyMdrV2.hex(frame.payload)}")
                                             recordFrame("RX", if (SonyMdrV2.Table.of(frame.dataType) == SonyMdrV2.Table.T2) "T2" else "T1", frame.payload)
                                             // Resolve an outstanding request, matched on the command
@@ -712,6 +778,10 @@ class BluetoothAncService : Service() {
 
                     if (!isActive) break
 
+                    // Cleared before the backoff, not after: the wait is exactly
+                    // when the headphones are most likely to come back, and an
+                    // ACL broadcast during it has to be able to shorten it.
+                    connectInProgress = false
                     connectFailures++
                     // A pair that was reachable moments ago is present, not absent.
                     // Retry promptly for the first few attempts, then fall back to
@@ -721,6 +791,11 @@ class BluetoothAncService : Service() {
                     else RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
                     updateNotification("Reconnecting in ${delay / 1000}s…")
                     delay(delay)
+                } finally {
+                    // Every other exit -- a clean give-up, an early return, a
+                    // cancellation -- lands here, so the flag cannot be left
+                    // stuck true and deafen the ACL receiver for good.
+                    connectInProgress = false
                 }
             }
 
@@ -738,6 +813,29 @@ class BluetoothAncService : Service() {
                 everConnected = false
                 broadcastStatus(status, "Headphones off — waiting")
                 updateNotification("Headphones off — waiting")
+
+                // Keep a slow heartbeat rather than stopping dead. One attempt a
+                // minute is not "constantly reconnecting", and it covers the
+                // case the ACL receiver cannot: the headphones already being
+                // on and ACL-up, so no further broadcast is coming. Without
+                // this the app needs a manual Start to recover.
+                slowPollJob?.cancel()
+                slowPollJob = scope.launch {
+                    while (isActive && btSocket == null) {
+                        delay(ABSENT_RETRY_MS)
+                        if (!isActive || btSocket != null) break
+                        // A burst may already be running from an earlier round.
+                        // connectBluetooth cancels the live job before starting
+                        // a new one, so reconnecting here would truncate that
+                        // burst and restart its backoff from zero -- turning a
+                        // slow recovery into exactly the loop this is meant to
+                        // prevent. Skip the round and look again next minute.
+                        if (connectionJob?.isActive == true) continue
+                        Log.d(tag, "Still nothing after the burst — slow retry")
+                        connectFailures = 0
+                        connectBluetooth(address)
+                    }
+                }
             }
         }
     }
@@ -1278,11 +1376,26 @@ class BluetoothAncService : Service() {
         )
         val connected = android.bluetooth.BluetoothProfile.STATE_CONNECTED
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
+        // Logged once per call, at the first probe. The value arrives boxed from
+        // reflection, and if it never equals STATE_CONNECTED this wait silently
+        // burns its full timeout on every attempt -- including the ones where
+        // the headphones are off and it can never succeed. One line per attempt
+        // is enough to tell those two cases apart in a capture.
+        var logged = false
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val ready = profiles.any { p ->
                 try {
-                    method.invoke(adapter, device, p) == connected
-                } catch (_: Exception) {
+                    val state = method.invoke(adapter, device, p) as? Int
+                    if (!logged) {
+                        logged = true
+                        Log.d(tag, "Profile probe $p → $state (connected=$connected)")
+                    }
+                    state == connected
+                } catch (e: Exception) {
+                    if (!logged) {
+                        logged = true
+                        Log.d(tag, "Profile probe threw: ${e.javaClass.simpleName}: ${e.message}")
+                    }
                     false
                 }
             }
@@ -1462,9 +1575,17 @@ class BluetoothAncService : Service() {
             }
         } catch (e: Exception) {
             Log.w(tag, "Frame send failed: ${e.message}")
-            btSocket = null
-            try { socket.close() } catch (_: Exception) {}
-            triggerReconnect()
+            // Only tear down the socket this write actually used. A newer
+            // connection may have replaced btSocket while this frame was in
+            // flight, and nulling it unconditionally killed a perfectly
+            // healthy link over a failure belonging to the previous one.
+            if (btSocket === socket) {
+                btSocket = null
+                try { socket.close() } catch (_: Exception) {}
+                triggerReconnect()
+            } else {
+                Log.d(tag, "Write failed on an already-replaced socket — leaving the live link alone")
+            }
         }
     }
 
@@ -1560,8 +1681,17 @@ class BluetoothAncService : Service() {
         return if (out.isEmpty()) null else out.toByteArray()
     }
 
-    private fun sendAck(seq: Int) {
-        val socket = btSocket ?: return
+    /**
+     * ACK on the socket the frame actually arrived on, not on whatever
+     * `btSocket` currently points at.
+     *
+     * These two can differ: the reader is draining the socket it captured when
+     * the link came up, while a reconnect may already have published a newer
+     * one. Re-reading the global meant ACKs for the old link were written to the
+     * new channel, which on a strict stop-and-wait link desyncs the device's
+     * retransmit state and can close a perfectly good connection.
+     */
+    private fun sendAck(socket: BluetoothSocket, seq: Int) {
         try {
             // body: dataType(0x01) seq size(4×0x00) — checksum = sum
             val check = (0x01 + seq) and 0xFF
@@ -2103,7 +2233,28 @@ class BluetoothAncService : Service() {
         const val EXTRA_MODE = "mode"
 
         // Reconnection
-        private const val MAX_RETRIES = 20
+        // Bounded on purpose. The old budget of 20 attempts with a 48s ceiling
+        // meant 13.6 minutes of backoff before the app would admit the
+        // headphones were gone -- and a dropped link deserves far less than
+        // that. A link that is merely flapping recovers in about a second
+        // (the everConnected fast path); a pair that is off is not coming back
+        // on attempt six, and the slow poll below covers that case anyway.
+        private const val MAX_RETRIES = 5
         private const val RETRY_DELAY_MS = 3_000L
+
+        /** Gap between ACL-triggered reconnects, so a flapping link cannot storm. */
+        private const val ACL_RECONNECT_COOLDOWN_MS = 30_000L
+
+        /**
+         * How often to try again once the burst is spent and the headphones
+         * look absent.
+         *
+         * Stopping outright would risk stranding the app: if the headphones are
+         * already on and ACL-up, no further ACL_CONNECTED ever arrives to wake
+         * us. One attempt a minute is not "constantly reconnecting", and it is
+         * the difference between recovering on its own and needing a manual
+         * Start.
+         */
+        private const val ABSENT_RETRY_MS = 60_000L
     }
 }
