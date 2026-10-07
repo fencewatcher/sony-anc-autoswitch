@@ -860,12 +860,22 @@ class BluetoothAncService : Service() {
                         connectFailures == 1 -> 500L
                         else -> RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
                     }
-                    broadcastStatus(
-                        status,
-                        "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES)",
-                    )
-                    updateNotification("Reconnecting in ${delay / 1000}s…")
-                    delay(delay)
+                    if (connectFailures < MAX_RETRIES) {
+                        // The number shown is the attempt about to run, which is
+                        // why it is connectFailures + 1 — and why this message is
+                        // skipped once the burst is spent: there is no upcoming
+                        // attempt, and announcing "attempt 6 of 5" followed by a
+                        // 48s wait that nothing survives was exactly that.
+                        broadcastStatus(
+                            status,
+                            "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES)",
+                        )
+                        updateNotification("Reconnecting in ${delay / 1000}s…")
+                        delay(delay)
+                    }
+                    // Otherwise fall through: the loop condition ends the burst and
+                    // the give-up branch flips to WAITING immediately, with no dead
+                    // backoff in between.
                 } finally {
                     // Every other exit -- a clean give-up, an early return, a
                     // cancellation -- lands here, so the flag cannot be left
