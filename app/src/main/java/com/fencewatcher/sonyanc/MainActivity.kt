@@ -32,6 +32,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_BA
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_START
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_STOP
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RECONNECT_NOW
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_APPLY_AMBIENT
@@ -255,7 +256,16 @@ class MainActivity : AppCompatActivity() {
                 val s = BluetoothAncService.Status.valueOf(status)
                 val msg = intent.getStringExtra(EXTRA_MESSAGE)
                 updateStatusDisplay(s, msg)
-                updateServiceRunning(s == BluetoothAncService.Status.CONNECTING || s == BluetoothAncService.Status.CONNECTED)
+                // The service now reports its own liveness. This matters for
+                // WAITING — service up, headphones away — which previously fell
+                // through to "not running" here and made the Home button offer
+                // Start on a service that was in fact alive and waiting.
+                updateServiceRunning(
+                    if (intent.hasExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING))
+                        intent.getBooleanExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING, false)
+                    else s != BluetoothAncService.Status.DISCONNECTED && s != BluetoothAncService.Status.ERROR
+                )
+                updateRetryVisibility(s)
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
                 updateCardStats()
@@ -418,6 +428,27 @@ class MainActivity : AppCompatActivity() {
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
+        // Shown only while the service is up but the link is not — the service
+        // already retries on its own; this skips the wait when the headphones
+        // have just come back and the next scheduled attempt is still a minute
+        // out.
+        binding.btnRetryNow.setOnClickListener {
+            if (!serviceRunning) {
+                Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            binding.btnRetryNow.isEnabled = false
+            binding.btnRetryNow.text = "Retrying…"
+            sendToService(ACTION_RECONNECT_NOW) {}
+            // Re-enabled by the next status broadcast, which the connect attempt
+            // produces almost immediately ("Connecting…" → connected or back to
+            // waiting). A fallback keeps the button from getting stuck if no
+            // broadcast arrives.
+            Handler(Looper.getMainLooper()).postDelayed({
+                binding.btnRetryNow.isEnabled = true
+                if (binding.btnRetryNow.text == "Retrying…") binding.btnRetryNow.text = "Retry now"
+            }, 4000)
+        }
         // ---- Ambient sound control: the three modes live in one card, and the active
         // one is highlighted. The old quick buttons gave no feedback about which mode
         // was actually selected, so you had to read the notification to know.
@@ -1581,6 +1612,17 @@ class MainActivity : AppCompatActivity() {
         binding.btnToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(
             if (running) Color.rgb(0x6A, 0x32, 0x32) else Color.rgb(0x3A, 0x5C, 0x46)
         )
+        if (!running) binding.btnRetryNow.visibility = View.GONE
+    }
+
+    /**
+     * "Retry now" only makes sense while the service is alive but the link is
+     * not — in WAITING, or mid-burst in CONNECTING. Hidden while connected and
+     * whenever the service reports it is not running.
+     */
+    private fun updateRetryVisibility(status: BluetoothAncService.Status) {
+        binding.btnRetryNow.visibility =
+            if (serviceRunning && status != BluetoothAncService.Status.CONNECTED) View.VISIBLE else View.GONE
     }
 
     private fun updateStatusDisplay(status: BluetoothAncService.Status, msg: String? = null) {
@@ -1590,20 +1632,20 @@ class MainActivity : AppCompatActivity() {
             BluetoothAncService.Status.DISCONNECTED -> Color.rgb(138, 138, 138)
             BluetoothAncService.Status.CONNECTING -> Color.rgb(232, 196, 120)
             BluetoothAncService.Status.CONNECTED -> Color.rgb(127, 212, 168)
+            // Standing by: service alive, headphones away. Blue reads as
+            // "waiting" and stays clearly apart from the connecting amber and
+            // the error red.
+            BluetoothAncService.Status.WAITING -> Color.rgb(120, 170, 220)
             BluetoothAncService.Status.ERROR -> Color.rgb(226, 128, 128)
         }
         val label = status.name.lowercase().replaceFirstChar { it.uppercase() }
-        // The broadcast message usually restates the status and sometimes adds
-        // detail ("Connecting…", "Disconnected, reconnecting…"). Comparing for
-        // equality was not enough — an ellipsis or trailing word both defeat it,
-        // which is why CONNECTING still rendered "CONNECTING — Connecting…".
-        // If the message already begins with the label, show the message alone:
-        // no duplication, and nothing is lost.
-        val text = when {
-            msg == null -> label
-            msg.trim().lowercase().startsWith(label.lowercase()) -> msg
-            else -> "$label — $msg"
-        }
+        // The service's messages are written to be self-sufficient ("Connected",
+        // "Waiting for headphones", "Reconnecting in 3s (attempt 2 of 5)"), so the
+        // message alone is shown whenever one exists. The old prefix logic tried
+        // to stitch "LABEL — message" together and kept producing duplicates or
+        // stitched lines like "Waiting — Headphones off — waiting"; dropping the
+        // label when a message is present avoids both.
+        val text = msg ?: label
         updateCardStatus(text)
         binding.textStatus.setTextColor(tint)
     }

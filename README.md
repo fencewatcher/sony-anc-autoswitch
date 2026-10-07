@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.65](https://img.shields.io/badge/version-1.65-blue)
+![v1.81](https://img.shields.io/badge/version-1.81-blue)
 
 ---
 
@@ -17,7 +17,8 @@
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough and auto-ambient settings
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification; both stay in sync
-- **🔄 Auto-reconnect** — Exponential backoff when Bluetooth drops
+- **🔄 Auto-reconnect** — Exponential backoff when Bluetooth drops, and a **Waiting** state once the headphones look absent: the service stays alive and picks them up the moment they return, instead of reading as "stopped"
+- **⚡ Retry now** — Skip the reconnect backoff with one tap on the Home card or the notification while the headphones are away
 
 ### Readouts — verified on hardware
 
@@ -61,7 +62,7 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 1. A foreground service connects over **Bluetooth RFCOMM** using the reverse-engineered Sony MDR protocol
 2. It monitors media sessions via `MediaSessionManager` / `AudioManager`
 3. Media plays → sends the ANC-on payload; paused → ambient payload
-4. Bluetooth drops → automatic reconnection with backoff
+4. Bluetooth drops → automatic reconnection with backoff; when the headphones are genuinely away the service enters **Waiting** — still running, still watching, and it reconnects on its own when they come back. A **Retry now** button skips the backoff.
 5. State is read back from the headphones with a real stop-and-wait request/response exchange
 
 ### Known gaps

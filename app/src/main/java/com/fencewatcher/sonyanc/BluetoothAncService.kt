@@ -168,34 +168,62 @@ class BluetoothAncService : Service() {
      */
     private val aclReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            if (intent?.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
             @Suppress("DEPRECATION")
-            val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val dev = intent?.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
             if (dev.address != deviceAddress) return
-            // An attempt is already running and will find the headphones on its
-            // own. Acting on the broadcast would cancel it mid-handshake, which
-            // is precisely the failure this guard exists to stop.
-            if (connectInProgress) {
-                Log.d(tag, "ACL broadcast during a live connect attempt — ignoring")
-                return
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    // An attempt is already running and will find the headphones on its
+                    // own. Acting on the broadcast would cancel it mid-handshake, which
+                    // is precisely the failure this guard exists to stop.
+                    if (connectInProgress) {
+                        Log.d(tag, "ACL broadcast during a live connect attempt — ignoring")
+                        return
+                    }
+                    // The link can already be up. Reconnecting now would close a
+                    // working socket because the profile happened to re-announce.
+                    if (btSocket != null && status == Status.CONNECTED) {
+                        Log.d(tag, "ACL broadcast for an already-connected link — ignoring")
+                        return
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastAclReconnectAt < ACL_RECONNECT_COOLDOWN_MS) {
+                        Log.d(tag, "ACL broadcast within cooldown — ignoring")
+                        return
+                    }
+                    lastAclReconnectAt = now
+                    connectFailures = 0
+                    Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
+                    triggerReconnect()
+                }
+
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    // The headphones went away at the link level. The read loop
+                    // notices the dead socket on its own and the reconnect burst
+                    // runs as before; what this adds is the *labelling*: the moment
+                    // the link drops we can say "headphones off — waiting" instead
+                    // of a generic disconnect, both in the notification and on the
+                    // Home card. Without it a powered-off pair reads as a fault
+                    // until the retry burst has spent itself.
+                    if (!isRunning) return
+                    if (btSocket != null && status == Status.CONNECTED) return  // read loop owns this transition
+                    headphonesAbsent = true
+                    if (status == Status.WAITING || status == Status.DISCONNECTED) {
+                        broadcastStatus(status, "Waiting — headphones powered off")
+                        updateNotification("Waiting — headphones powered off")
+                    }
+                }
             }
-            // The link can already be up. Reconnecting now would close a
-            // working socket because the profile happened to re-announce.
-            if (btSocket != null && status == Status.CONNECTED) {
-                Log.d(tag, "ACL broadcast for an already-connected link — ignoring")
-                return
-            }
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastAclReconnectAt < ACL_RECONNECT_COOLDOWN_MS) {
-                Log.d(tag, "ACL broadcast within cooldown — ignoring")
-                return
-            }
-            lastAclReconnectAt = now
-            connectFailures = 0
-            Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
-            triggerReconnect()
         }
     }
+
+    /**
+     * Set by the ACL receiver when the headphones drop at the link level, so the
+     * wait state can be described as "powered off" rather than a connection
+     * fault. Cleared on the next successful connect.
+     */
+    @Volatile
+    private var headphonesAbsent = false
     private var batteryPercent: Int? = null
 
     /** Latch for the battery-low trigger, so it fires once per crossing. */
@@ -221,7 +249,10 @@ class BluetoothAncService : Service() {
         runCatching {
             registerReceiver(
                 aclReceiver,
-                android.content.IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED),
+                android.content.IntentFilter().apply {
+                    addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                    addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                },
             )
         }
         Log.d(tag, "Service created")
@@ -478,6 +509,21 @@ class BluetoothAncService : Service() {
                 }
 
 
+                ACTION_RECONNECT_NOW -> {
+                    // "Retry now" from the Home card or the notification. Only
+                    // meaningful while the service is up but the link is not.
+                    if (!isRunning || deviceAddress == null) {
+                        Log.d(tag, "Retry-now ignored: service not running")
+                    } else if (status == Status.CONNECTED) {
+                        Log.d(tag, "Retry-now ignored: already connected")
+                    } else {
+                        Log.d(tag, "Retry now requested — restarting the connect cycle")
+                        connectFailures = 0
+                        lastAclReconnectAt = 0L
+                        triggerReconnect()
+                    }
+                }
+
                 ACTION_RELOAD_AUTOMATION -> reloadAutomation()
             }
         } catch (e: Exception) {
@@ -626,11 +672,21 @@ class BluetoothAncService : Service() {
                         }
                     } catch (_: Exception) {}
 
-                    // Try multiple connection methods — Sony RFCOMM is finicky
-                    if (!awaitProfileReady(device)) {
+                                        // Try multiple connection methods — Sony RFCOMM is finicky.
+                    // First attempt of a burst gets the longer wait: the headphones
+                    // have often just been turned on, and the profile can take a
+                    // few seconds to settle. Later attempts already had their chance.
+                    val profileReady = awaitProfileReady(device, if (connectFailures == 0) 8_000L else 4_000L)
+                    if (!profileReady) {
                         Log.d(tag, "Profile not ready after wait — trying anyway")
                     }
-                    val socket = connectSonyRfcomm(device)
+                    // Rotating through every socket factory is only worth it while
+                    // there is reason to believe the headphones are actually
+                    // reachable. When the profile probe says they are not and we
+                    // already know which channel worked before, one attempt on
+                    // that channel is enough — the full rotation used to burn
+                    // half a minute paging a powered-off pair on every retry.
+                    val socket = connectSonyRfcomm(device, fullRotation = profileReady || lastGoodChannel == null)
                     // Publish only once the channel is actually up. Assigning
                     // first left a window where a concurrent sender (the 60s
                     // poll, an ACTION_ intent, a media-state change) could pick
@@ -644,6 +700,7 @@ class BluetoothAncService : Service() {
                     slowPollJob?.cancel()
                     slowPollJob = null
                     status = Status.CONNECTED
+                    headphonesAbsent = false
                     broadcastStatus(status, "Connected")
                     updateNotification("Connected")
                     currentSeq = 0       // Reset seq on every fresh connection
@@ -749,21 +806,28 @@ class BluetoothAncService : Service() {
 
                     // Socket closed — reconnect automatically
                     btSocket = null
-                    status = Status.DISCONNECTED
 
                     if (powerOffRequested) {
                         // The user turned the headphones off on purpose. Do not
-                        // treat the resulting disconnect as a fault.
+                        // treat the resulting disconnect as a fault. Keep the
+                        // service alive in the WAITING state so it can pick the
+                        // headphones up again the moment they come back.
                         Log.d(tag, "Socket closed after deliberate power-off — not reconnecting")
                         powerOffRequested = false
-                        broadcastStatus(status, "Powered off")
-                        updateNotification("Powered off")
+                        everConnected = false
+                        status = Status.WAITING
+                        broadcastStatus(status, "Waiting — headphones powered off")
+                        updateNotification("Waiting — headphones powered off")
                         refreshNotification()
+                        startAbsentPoll(address)
                         return@launch
                     }
 
                     Log.d(tag, "Socket closed — reconnecting")
-                    broadcastStatus(status, "Disconnected")
+                    // CONNECTING rather than DISCONNECTED: a dropped link with the
+                    // service still up is work in progress, not a stopped service.
+                    status = Status.CONNECTING
+                    broadcastStatus(status, "Reconnecting…")
                     updateNotification("Disconnected, reconnecting…")
                     runAutomation(Automation.Trigger.DEVICE_DISCONNECTED)
                     triggerReconnect()
@@ -773,9 +837,6 @@ class BluetoothAncService : Service() {
                     throw e  // Propagate cancellation
                 } catch (e: Exception) {
                     Log.w(tag, "BT error: ${e.javaClass.simpleName}: ${e.message}")
-                    status = Status.DISCONNECTED
-                    broadcastStatus(status, "${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
-
                     if (!isActive) break
 
                     // Cleared before the backoff, not after: the wait is exactly
@@ -783,12 +844,26 @@ class BluetoothAncService : Service() {
                     // ACL broadcast during it has to be able to shorten it.
                     connectInProgress = false
                     connectFailures++
+                    // While the burst is running the service is still working, not
+                    // dead: stay CONNECTING so the UI keeps offering Stop rather
+                    // than Start, and carry the retry plan in the message instead.
+                    status = Status.CONNECTING
                     // A pair that was reachable moments ago is present, not absent.
                     // Retry promptly for the first few attempts, then fall back to
                     // the normal backoff so a genuinely powered-off pair is not
-                    // hammered -- the loop gives up on its own after this.
-                    val delay = if (everConnected && connectFailures <= 3) 800L
-                    else RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
+                    // hammered -- the loop gives up on its own after this. A first
+                    // attempt that failed also retries almost immediately: the
+                    // headphones often answer the second try, and a three-second
+                    // wait in front of it only read as "the app is slow".
+                    val delay = when {
+                        everConnected && connectFailures <= 3 -> 800L
+                        connectFailures == 1 -> 500L
+                        else -> RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
+                    }
+                    broadcastStatus(
+                        status,
+                        "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES)",
+                    )
                     updateNotification("Reconnecting in ${delay / 1000}s…")
                     delay(delay)
                 } finally {
@@ -804,38 +879,46 @@ class BluetoothAncService : Service() {
                 broadcastStatus(status)
                 updateNotification("Stopped")
             } else {
-                status = Status.DISCONNECTED
+                status = Status.WAITING
                 // Not a fault: most often the headphones are simply powered off.
-                // Waiting for the Bluetooth profile to report them back beats
-                // hammering the stack every few seconds.
-                // The retry budget is spent, so the next round starts from the
-                // absent-device pacing rather than the dropped-link pacing.
+                // WAITING says "the service is up and will pick them up" — which
+                // is what the button used to contradict by flipping back to Start.
                 everConnected = false
-                broadcastStatus(status, "Headphones off — waiting")
-                updateNotification("Headphones off — waiting")
+                broadcastStatus(status, "Waiting for headphones")
+                updateNotification("Waiting for headphones")
+                startAbsentPoll(address)
+            }
+        }
+    }
 
-                // Keep a slow heartbeat rather than stopping dead. One attempt a
-                // minute is not "constantly reconnecting", and it covers the
-                // case the ACL receiver cannot: the headphones already being
-                // on and ACL-up, so no further broadcast is coming. Without
-                // this the app needs a manual Start to recover.
-                slowPollJob?.cancel()
-                slowPollJob = scope.launch {
-                    while (isActive && btSocket == null) {
-                        delay(ABSENT_RETRY_MS)
-                        if (!isActive || btSocket != null) break
-                        // A burst may already be running from an earlier round.
-                        // connectBluetooth cancels the live job before starting
-                        // a new one, so reconnecting here would truncate that
-                        // burst and restart its backoff from zero -- turning a
-                        // slow recovery into exactly the loop this is meant to
-                        // prevent. Skip the round and look again next minute.
-                        if (connectionJob?.isActive == true) continue
-                        Log.d(tag, "Still nothing after the burst — slow retry")
-                        connectFailures = 0
-                        connectBluetooth(address)
-                    }
-                }
+    /**
+     * The once-a-minute poll that runs after the fast retry burst is spent.
+     *
+     * Exists to prevent a stranded app. ACTION_ACL_CONNECTED fires when the
+     * link comes up, which may be *before* the app starts retrying -- so an
+     * app that gives up while the headphones are already on and ACL-up would
+     * sit there waiting for a broadcast that has already been and gone.
+     *
+     * Runs on the scope rather than as a child of the finished connect job, so
+     * it survives that job's cancellation and keeps covering both exits that
+     * land in the wait state: a spent burst and a deliberate power-off.
+     */
+    private fun startAbsentPoll(address: String) {
+        slowPollJob?.cancel()
+        slowPollJob = scope.launch {
+            while (isActive && btSocket == null) {
+                delay(ABSENT_RETRY_MS)
+                if (!isActive || btSocket != null) break
+                // A burst may already be running from an earlier round.
+                // connectBluetooth cancels the live job before starting
+                // a new one, so reconnecting here would truncate that
+                // burst and restart its backoff from zero -- turning a
+                // slow recovery into exactly the loop this is meant to
+                // prevent. Skip the round and look again next minute.
+                if (connectionJob?.isActive == true) continue
+                Log.d(tag, "Still nothing after the burst — slow retry")
+                connectFailures = 0
+                connectBluetooth(address)
             }
         }
     }
@@ -1308,21 +1391,50 @@ class BluetoothAncService : Service() {
      * is used whenever it yields a socket at all. Reflection channels are tried
      * only when no UUID produces one, which is the case they actually exist for.
      */
-    private fun connectSonyRfcomm(device: BluetoothDevice): BluetoothSocket {
+    /**
+     * Factory for the channel that last produced a working link, so reconnects
+     * try it first instead of re-walking the whole factory list. Cleared when
+     * the service restarts; closures capture the same device address throughout
+     * one service life, which is all this single-device app needs.
+     */
+    private var lastGoodChannel: (() -> BluetoothSocket)? = null
+
+    private fun connectSonyRfcomm(device: BluetoothDevice, fullRotation: Boolean): BluetoothSocket {
         val failures = mutableListOf<String>()
+
+        fun tryCreate(label: String, create: () -> BluetoothSocket): BluetoothSocket? = try {
+            val socket = create()
+            Log.d(tag, "Using socket from $label")
+            lastGoodChannel = create
+            socket
+        } catch (e: Exception) {
+            failures += "create $label: ${e.message}"
+            null
+        }
+
+        // The channel that produced the last working link goes first, so a
+        // reconnect does not re-probe every factory.
+        lastGoodChannel?.let { create ->
+            tryCreate("last known-good channel", create)?.let { return it }
+        }
+
+        if (!fullRotation) {
+            // The profile probe says the headphones are not reachable and we
+            // know which channel worked before. One attempt on it is enough —
+            // walking every factory against a powered-off pair cost half a
+            // minute per retry and never succeeded.
+            throw IOException("Headphones unreachable — profile not connected (${failures.joinToString("; ")})")
+        }
 
         for (uuidStr in HeadphoneProfile.allUuids) {
             val uuid = UUID.fromString(uuidStr)
             for (secure in listOf(true, false)) {
                 val label = (if (secure) "" else "insecure ") + uuidStr
-                try {
-                    val socket = if (secure) device.createRfcommSocketToServiceRecord(uuid)
+                val socket = tryCreate(label) {
+                    if (secure) device.createRfcommSocketToServiceRecord(uuid)
                     else device.createInsecureRfcommSocketToServiceRecord(uuid)
-                    Log.d(tag, "Using socket from $label")
-                    return socket
-                } catch (e: IOException) {
-                    failures += "create $label: ${e.message}"
                 }
+                if (socket != null) return socket
             }
         }
 
@@ -1335,13 +1447,10 @@ class BluetoothAncService : Service() {
             throw IOException("No RFCOMM strategy available: ${e.message}", e)
         }
         for (ch in channels) {
-            try {
-                val socket = createCh.invoke(device, ch) as BluetoothSocket
-                Log.d(tag, "Using socket from reflection channel $ch")
-                return socket
-            } catch (e: Exception) {
-                failures += "create channel $ch: ${e.message}"
+            val socket = tryCreate("reflection channel $ch") {
+                createCh.invoke(device, ch) as BluetoothSocket
             }
+            if (socket != null) return socket
         }
 
         throw IOException("No RFCOMM socket could be created — ${failures.joinToString("; ")}")
@@ -1844,7 +1953,7 @@ class BluetoothAncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             // The shade already shows "Sony ANC Auto" above this, so the model name
             // is more useful here than repeating the app name.
             .setContentTitle(profile.modelName)
@@ -1857,6 +1966,23 @@ class BluetoothAncService : Service() {
             // Foreground service notification: it refreshes on every battery tick and
             // mode change, and must not buzz each time.
             .setSilent(true)
+
+        // While the service is alive but the headphones are away, offer a direct
+        // nudge out of the shade. WAITING is a state the user previously could
+        // only act on by opening the app and pressing Start.
+        if (status == Status.WAITING) {
+            builder.addAction(
+                R.drawable.ic_refresh,
+                "Retry now",
+                PendingIntent.getService(
+                    this, 3,
+                    Intent(this, BluetoothAncService::class.java).apply { action = ACTION_RECONNECT_NOW },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+        }
+
+        return builder
             .addAction(
                 if (paused) R.drawable.ic_play else R.drawable.ic_pause,
                 if (paused) "Resume" else "Pause",
@@ -1871,6 +1997,8 @@ class BluetoothAncService : Service() {
     private fun defaultStatusLine(): String = when (status) {
         Status.CONNECTED -> if (isMediaPlaying) "Playing" else "Idle"
         Status.CONNECTING -> "Connecting…"
+        // Alive but the headphones are away. It is not a fault and not a stop.
+        Status.WAITING -> "Waiting for headphones"
         Status.DISCONNECTED -> "Disconnected"
         Status.ERROR -> "Error"
     }
@@ -1891,11 +2019,19 @@ class BluetoothAncService : Service() {
 
     // ---- Status broadcasting ----
 
-    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
+    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, WAITING, ERROR }
 
     @Volatile
     var status: Status = Status.DISCONNECTED
         private set
+
+    /**
+     * Last human-readable status line sent with a status broadcast. Re-sent by
+     * broadcastStats so a battery tick or mode change cannot blank the Home
+     * card's detail line back to a bare status label.
+     */
+    @Volatile
+    private var lastStatusMessage: String? = null
 
     // Tracked EQ state (from incoming 0x57/0x59 frames)
     var eqActivePreset: Int = 0
@@ -2033,10 +2169,16 @@ class BluetoothAncService : Service() {
         private set
 
     private fun broadcastStatus(s: Status, message: String? = null) {
+        lastStatusMessage = message
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, s.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (message != null) putExtra(EXTRA_MESSAGE, message)
+            // The service's own liveness, separate from the link state. WAITING
+            // means "service up, headphones away" — the UI previously derived
+            // "not running" from exactly this state and offered Start on a
+            // service that was in fact alive.
+            putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
             `package` = packageName
@@ -2051,6 +2193,9 @@ class BluetoothAncService : Service() {
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, status.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
+            // Keep the card's detail line alive across stats-only refreshes.
+            lastStatusMessage?.let { putExtra(EXTRA_MESSAGE, it) }
+            putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
@@ -2189,6 +2334,9 @@ class BluetoothAncService : Service() {
          */
         const val ACTION_SYNC_STATE = "$PACKAGE.action.SYNC_STATE"
 
+        /** "Retry now" — user-initiated immediate reconnect while WAITING. */
+        const val ACTION_RECONNECT_NOW = "$PACKAGE.action.RECONNECT_NOW"
+
         /** Minimum gap between frame-log broadcasts to the debug menu. */
         const val FRAME_LOG_PUSH_INTERVAL_MS = 250L
 
@@ -2203,6 +2351,9 @@ class BluetoothAncService : Service() {
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"
+
+        /** Broadcast extra: the service's own liveness, independent of the link state. */
+        const val EXTRA_SERVICE_RUNNING = "service_running"
         const val EXTRA_EQ_PRESET = "eq_preset"
         const val EXTRA_EQ_BANDS = "eq_bands"
         const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
