@@ -1,10 +1,10 @@
 # Sony ANC Auto-Switch
 
-> Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and a live readout of what the headphones are actually doing.
+> Automatically toggles ANC on your Sony WH-1000XM6 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and a live readout of what the headphones are actually doing.
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.82](https://img.shields.io/badge/version-1.82-blue)
+![v1.83](https://img.shields.io/badge/version-1.83-blue)
 
 ---
 
@@ -80,8 +80,13 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 ## Requirements
 
 - **Android 8.0+** (API 26)
-- A **paired** Sony WH-1000XM6 or XM5 (or compatible)
+- A **paired** Sony WH-1000XM6 (or compatible)
 - Bluetooth enabled
+
+**WH-1000XM5 is not supported.** Its protocol paths were never verified on real
+hardware — connections half-worked and readouts were wrong — so XM5 support was
+scrapped in v1.83 rather than shipped broken. The service refuses an XM5 by
+device name.
 
 ## Building
 
@@ -119,10 +124,9 @@ The APK records its commit hash as `BUILD_HASH`, shown at the bottom of the Home
 
 The service implements the Sony **MDR** (Music Data Relay) protocol over Bluetooth Classic RFCOMM.
 
-- **Service UUIDs:** `956c7b26-…` (XM6, v2) or `96cc203e-…` (XM5, v1)
+- **Service UUIDs:** `956c7b26-…` (MDR v2)
 - **Frame:** `SOF(0x3E) | dataType | seq | size(4B BE) | payload | checksum | EOF(0x3C)`
 - **ANC payload (XM6):** `68 19 01 <enable> <mode> <av> <level> <na> <naSens>` (9 bytes)
-- **ANC payload (XM5):** `68 18 01 <totalEffect> <mode> <av> <level>` (7 bytes)
 - **EQ preset:** `58 00 <presetID> 00`, then re-query `56 00`
 - **Custom EQ:** `58 00 <profileID> <count> <bands…>`, then re-query
 
@@ -165,7 +169,7 @@ app/src/main/java/com/fencewatcher/sonyanc/
 ├── BluetoothAncService.kt   # Foreground RFCOMM service — connection, handshake, read loop, state
 ├── SonyMdrV2.kt             # MDR v2 payloads: command/type bytes, frame builders, tables T1/T2
 ├── SonyAncProtocol.kt       # Frame encoder/decoder: SOF/EOF escaping, checksum, framing
-├── HeadphoneProfile.kt      # XM5 vs XM6 differences — UUID, payload length, handshake
+├── HeadphoneProfile.kt      # The WH-1000XM6 wire profile — UUID, payloads, handshake
 ├── MainActivity.kt          # Tab UI, device picker, EQ, settings
 ├── DebugActivity.kt         # Frame log with timestamps, T1/T2, raw send
 ├── Automation.kt            # Rules, triggers, actions

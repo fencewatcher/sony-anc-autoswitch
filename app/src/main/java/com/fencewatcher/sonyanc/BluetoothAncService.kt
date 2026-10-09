@@ -231,11 +231,7 @@ class BluetoothAncService : Service() {
     private var currentModeName: String = "—"
     @Volatile
     private var autoPaused = false
-    private var profile: HeadphoneProfile = HeadphoneProfile.Xm6
-
-    /** "auto" | "xm5" | "xm6" — user-pinned protocol, see EXTRA_PROFILE_OVERRIDE. */
-    @Volatile
-    private var profileOverride: String = "auto"
+    private val profile = HeadphoneProfile
 
     // ---- Lifecycle ----
 
@@ -270,7 +266,6 @@ class BluetoothAncService : Service() {
                             return START_NOT_STICKY
                         }
                     deviceAddress = address
-                    profileOverride = intent.getStringExtra(EXTRA_PROFILE_OVERRIDE) ?: "auto"
                     isRunning = true
                     powerOffRequested = false   // fresh start, not a leftover power-off
                     Log.d(tag, "Starting service, device=$address")
@@ -444,9 +439,9 @@ class BluetoothAncService : Service() {
                 ACTION_SET_CONNECTION_MODE -> {
                     val soundQuality = intent.getBooleanExtra("sound_quality", true)
                     scope.launch {
-                        sendFrame(SonyMdrV2.buildConnectionModeSet(isXm5(), soundQuality))
+                        sendFrame(SonyMdrV2.buildConnectionModeSet(soundQuality))
                         delay(150L)
-                        sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
+                        sendFrame(SonyMdrV2.buildConnectionModeGet())
                     }
                 }
 
@@ -640,20 +635,18 @@ class BluetoothAncService : Service() {
 
                     val device: BluetoothDevice = adapter.getRemoteDevice(address)
 
-                    // Detect headphone model from device name, unless the user pinned
-                    // one. A silent fallback to XM6 is the wrong default to be stuck
-                    // with on hardware you cannot test against, so the override is
-                    // threaded through to here rather than living in the UI only.
-                    profile = when (profileOverride) {
-                        "xm5" -> HeadphoneProfile.Xm5
-                        "xm6" -> HeadphoneProfile.Xm6
-                        else -> HeadphoneProfile.detect(device.name ?: "")
+                    // XM5 hardware shares the XM6 service UUID, so a socket to it
+                    // would open and then speak the wrong protocol — the broken
+                    // connections and wrong readouts that led to XM5 support being
+                    // scrapped in v1.83. Refuse it politely instead of half-working.
+                    if ((device.name ?: "").contains("XM5", ignoreCase = true)) {
+                        Log.w(tag, "WH-1000XM5 detected — not supported")
+                        status = Status.ERROR
+                        broadcastStatus(status, "WH-1000XM5 is not supported — this app is XM6 only")
+                        updateNotification("XM5 not supported")
+                        return@launch
                     }
-                    Log.d(
-                        tag,
-                        "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)" +
-                            if (profileOverride != "auto") " [pinned: $profileOverride]" else "",
-                    )
+                    Log.d(tag, "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)")
                     try {
                         btSocket?.close()
                     } catch (_: Exception) {}
@@ -1165,12 +1158,9 @@ class BluetoothAncService : Service() {
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_NOTIFY,
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
-                        // XM6 carries the PriorMode byte at index 2; XM5 inserts a
-                        // setting-type byte first, so it lands at index 3.
-                        val idx = if (subtype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5) 3 else 2
-                        val prior = SonyMdrV2.decodePriorMode(p, idx)
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_NOTIFY -> {
+                        // XM6 carries the PriorMode byte at index 2.
+                        val prior = SonyMdrV2.decodePriorMode(p, 2)
                         if (prior != null) {
                             connectionSoundQuality = prior
                             Log.d(tag, "Connection mode: sound quality = $prior")
@@ -1354,7 +1344,7 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildUpscalingGet())
         request(SonyMdrV2.buildBgmGet())
         request(SonyMdrV2.buildUpmixGet())
-        request(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        request(SonyMdrV2.buildConnectionModeGet())
         // Button mapping. The reply shape is not established yet, so it is
         // captured raw rather than parsed -- this is the step that makes the
         // [NC/AMB] remap possible instead of guessed at.
@@ -2147,9 +2137,6 @@ class BluetoothAncService : Service() {
     var senseDebug: String = "no SENSE frame yet"
         private set
 
-    /** True when the connected model uses the V1 (XM5) wire format. */
-    private fun isXm5(): Boolean = profile == HeadphoneProfile.Xm5
-
     /** True = "Fix Playback": multipoint will not hand the audio over. */
 
     /** True while the headphones are in Bluetooth pairing (inquiry scan) mode. */
@@ -2352,12 +2339,6 @@ class BluetoothAncService : Service() {
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
-
-        /**
-         * "auto" (default), "xm5" or "xm6". Lets the user pin a protocol when the
-         * device name is unhelpful or the fallback guess is wrong.
-         */
-        const val EXTRA_PROFILE_OVERRIDE = "profile_override"
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"

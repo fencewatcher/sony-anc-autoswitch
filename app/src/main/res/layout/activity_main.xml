@@ -179,14 +179,7 @@
                     <Button android:id="@+id/btnRefresh" android:layout_width="44dp" android:layout_height="44dp" android:text="↻" android:textSize="18sp" android:textColor="@android:color/white" app:cornerRadius="16dp" app:backgroundTint="#FF757575" android:padding="0dp" android:layout_marginStart="8dp" />
                 </LinearLayout>
 
-                <TextView android:id="@+id/textProfile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FF888888" android:text="Protocol: auto-detect" android:layout_marginTop="6dp" android:layout_marginBottom="10dp" />
-
-                <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="PROTOCOL" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="6dp" />
-
-                <LinearLayout android:layout_width="match_parent" android:layout_height="44dp" android:orientation="horizontal" android:gravity="center_vertical" android:background="@drawable/bg_field" android:paddingHorizontal="14dp" android:layout_marginBottom="16dp">
-                    <Spinner android:id="@+id/spinnerProfile" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:background="@android:color/transparent" android:popupBackground="#FF2A2A2E" />
-                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="▾" android:textSize="16sp" android:textColor="#FF888888" android:contentDescription="Select protocol" />
-                </LinearLayout>
+                <TextView android:id="@+id/textProfile" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="12sp" android:textColor="#FF888888" android:text="Protocol: WH-1000XM6" android:layout_marginTop="6dp" android:layout_marginBottom="16dp" />
 
                 </LinearLayout></com.google.android.material.card.MaterialCardView><com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="MULTIPOINT" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="8dp" />
 

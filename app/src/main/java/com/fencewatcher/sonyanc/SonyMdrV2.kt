@@ -414,16 +414,16 @@ object SonyMdrV2 {
     const val AUDIO_TYPE_BGM_MODE = 0x03
     const val AUDIO_TYPE_UPMIX_CINEMA = 0x04
     const val AUDIO_TYPE_BGM_AND_ERRORCODE = 0x09
-    // Connection mode. XM6 and XM5 disagree on the type byte.
+    // Connection mode (the XM6 quality-priority type byte).
     //
     // The XM6 type is CONNECTION_MODE_WITH_LDAC_STATUS (0x02), and it is the
     // same byte for set and readback. The earlier attempt used
     // CONNECTION_MODE_CLASSIC_AUDIO_LE_AUDIO (0x05), which is the LE-Audio
     // transport switch rather than the quality priority — the headphones
     // accepted the frame and then always answered 0x00, so the value never
-    // changed and the toggle looked pinned.
+    // changed and the toggle looked pinned. (XM5 used 0x01 for this param;
+    // XM5 support was scrapped in v1.83.)
     const val AUDIO_TYPE_CONNECTION_MODE_XM6 = 0x02 // set and read
-    const val AUDIO_TYPE_CONNECTION_MODE_XM5 = 0x01 // set and read
     /**
      * The headphones answer a set with a *notify* under this type, not a readback
      * — e.g. `e8 02 01` is answered `e9 05 01 00`, roughly 100ms before the
@@ -431,7 +431,6 @@ object SonyMdrV2 {
      * instead of trailing the round trip.
      */
     const val AUDIO_TYPE_CONNECTION_NOTIFY = 0x05
-    const val CONNECTION_SETTING_SOUND_CONNECTION = 0x00 // XM5 only
     const val PRIOR_SOUND_QUALITY = 0x00
     const val PRIOR_CONNECTION_QUALITY = 0x01
 
@@ -499,21 +498,14 @@ object SonyMdrV2 {
      * [PriorMode] here is the same pair Sony's app calls sound-quality-priority
      * vs connection-priority.
      */
-    fun buildConnectionModeGet(xm5: Boolean): ByteArray = byteArrayOf(
+    fun buildConnectionModeGet(): ByteArray = byteArrayOf(
         CMD_AUDIO_GET_PARAM.toByte(),
-        (if (xm5) AUDIO_TYPE_CONNECTION_MODE_XM5 else AUDIO_TYPE_CONNECTION_MODE_XM6).toByte(),
+        AUDIO_TYPE_CONNECTION_MODE_XM6.toByte(),
     )
 
-    fun buildConnectionModeSet(xm5: Boolean, soundQualityPrior: Boolean): ByteArray {
+    fun buildConnectionModeSet(soundQualityPrior: Boolean): ByteArray {
         val prior = (if (soundQualityPrior) PRIOR_SOUND_QUALITY else PRIOR_CONNECTION_QUALITY).toByte()
-        // XM5: [cmd, type, settingType, prior] — it really does carry the extra byte.
-        if (xm5) {
-            return byteArrayOf(
-                CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM5.toByte(),
-                CONNECTION_SETTING_SOUND_CONNECTION.toByte(), prior,
-            )
-        }
-        // XM6: [cmd, type, prior]
+        // [cmd, type, prior]
         return byteArrayOf(
             CMD_AUDIO_SET_PARAM.toByte(), AUDIO_TYPE_CONNECTION_MODE_XM6.toByte(), prior,
         )

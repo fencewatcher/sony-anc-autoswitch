@@ -23,7 +23,6 @@ import androidx.core.content.ContextCompat
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.STATUS_BROADCAST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PROFILE_OVERRIDE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
@@ -480,29 +479,6 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
 
-        // Protocol override. Auto-detect falls back to XM6 for any name it does not
-        // recognise, which is the wrong thing to be stuck with on hardware you cannot
-        // test — so the model can be pinned explicitly. Applies on next start.
-        val profileValues = arrayOf("auto", "xm6", "xm5")
-        val profileAdapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_spinner_item)
-        profileAdapter.addAll("Auto-detect", "WH-1000XM6", "WH-1000XM5")
-        profileAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerProfile.adapter = profileAdapter
-        var profileSpinnerReady = false
-        binding.spinnerProfile.setSelection(
-            profileValues.indexOf(profilePreference()).coerceAtLeast(0),
-        )
-        profileSpinnerReady = true
-        binding.spinnerProfile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                if (!profileSpinnerReady) return
-                val value = profileValues.getOrElse(pos) { "auto" }
-                getSharedPreferences("anc_settings", MODE_PRIVATE).edit()
-                    .putString("profile_override", value).apply()
-                updateProfileLabel()
-            }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
         updateProfileLabel()
 
         // EQ
@@ -1457,8 +1433,7 @@ class MainActivity : AppCompatActivity() {
         binding.textLevelValue.text = level.toString()
         binding.switchVoice.isChecked = prefs.getBoolean("voice_passthrough_$addr", false)
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
-        val name = pairedDevices.find { it.address == addr }?.name ?: ""
-        updateProfileLabel(name)
+        updateProfileLabel()
     }
 
 
@@ -1476,25 +1451,9 @@ class MainActivity : AppCompatActivity() {
         if (BluetoothAncService.isRunning) sendToService(ACTION_APPLY_AMBIENT) {}
     }
 
-    private fun profilePreference(): String =
-        getSharedPreferences("anc_settings", MODE_PRIVATE).getString("profile_override", "auto") ?: "auto"
-
-    /**
-     * Mirrors the protocol the service will actually use. On auto it names the model
-     * detect() resolved to, so the silent XM6 fallback is visible rather than a
-     * surprise at connect time.
-     */
-    private fun updateProfileLabel(deviceName: String = "") {
-        val pinned = profilePreference()
-        binding.textProfile.text = when (pinned) {
-            "xm5" -> "Protocol: WH-1000XM5 (pinned)"
-            "xm6" -> "Protocol: WH-1000XM6 (pinned)"
-            else -> {
-                val guess = HeadphoneProfile.detect(deviceName).modelName
-                val warn = if (deviceName.contains("XM", ignoreCase = true)) "" else "  ·  name not recognised"
-                "Protocol: $guess$warn"
-            }
-        }
+    /** The app speaks the XM6 protocol and nothing else. */
+    private fun updateProfileLabel() {
+        binding.textProfile.text = "Protocol: WH-1000XM6"
     }
 
     private fun saveSetting(key: String, value: Any) {
@@ -1535,7 +1494,11 @@ class MainActivity : AppCompatActivity() {
 
         for (d in (adapter.bondedDevices ?: emptySet())) {
             val name = d.name ?: ""
-            if (name.contains("WH-1000XM", ignoreCase = true)) pairedDevices.add(DeviceInfo(name, d.address))
+            // XM6 only. An XM5 shares the XM6 service UUID but speaks the wrong
+            // protocol; listing it would start a service that half-works. The
+            // service refuses an XM5 by name as a second gate.
+            if (name.contains("WH-1000XM", ignoreCase = true) && !name.contains("XM5", ignoreCase = true))
+                pairedDevices.add(DeviceInfo(name, d.address))
         }
         if (pairedDevices.isEmpty()) {
             binding.textModel.text = "No headphones"; updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
@@ -1555,16 +1518,12 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Swap the hero image for the connected model, falling back to the vector icon
-     * for anything without artwork yet (XM5, and unrecognised names). Product shots
+     * for unrecognised names. Product shots
      * live in drawable-nodpi so they are not rescaled per screen density.
      */
     private fun updateModelArt(name: String) {
         binding.imageModel.setImageResource(
-            when {
-                name.contains("XM6", ignoreCase = true) -> R.drawable.model_xm6
-                name.contains("XM5", ignoreCase = true) -> R.drawable.model_xm5
-                else -> R.drawable.ic_headphones_big
-            }
+            if (name.contains("XM6", ignoreCase = true)) R.drawable.model_xm6 else R.drawable.ic_headphones_big
         )
     }
 
@@ -1590,7 +1549,6 @@ class MainActivity : AppCompatActivity() {
         Intent(this, BluetoothAncService::class.java).apply {
             action = ACTION_START
             putExtra(EXTRA_ADDRESS, device.address)
-            putExtra(EXTRA_PROFILE_OVERRIDE, profilePreference())
         }.also { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it) else startService(it) }
         updateServiceRunning(true); updateCardStatus("Starting…")
     }
