@@ -265,6 +265,16 @@ class MainActivity : AppCompatActivity() {
                     else s != BluetoothAncService.Status.DISCONNECTED && s != BluetoothAncService.Status.ERROR
                 )
                 updateRetryVisibility(s)
+                // When the service reports it is not running, its readouts are
+                // stale by definition — clear them instead of showing leftovers.
+                // A stopped service also stops sending battery extras, so this is
+                // the only place the old value would ever be dropped.
+                if (intent.hasExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING) &&
+                    !intent.getBooleanExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING, false)
+                ) {
+                    battery = null
+                    currentMode = "—"
+                }
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
                 updateCardStats()
@@ -1555,7 +1565,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopService() {
         sendToService(ACTION_STOP) {}
-        updateServiceRunning(false); updateCardStatus("⏹ Stopped")
+        // Clear the readouts along with the service — they described a link
+        // that no longer exists, and leftover values read as if data were
+        // still current.
+        battery = null
+        currentMode = "—"
+        updateServiceRunning(false)
+        updateCardStats()
+        updateCardStatus("⏹ Stopped")
     }
 
     // ---- Dashboard card ----

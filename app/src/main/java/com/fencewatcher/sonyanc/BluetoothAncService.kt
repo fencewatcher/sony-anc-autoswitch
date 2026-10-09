@@ -277,6 +277,11 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Stopping service")
                     isRunning = false
                     status = Status.DISCONNECTED
+                    // Clear the readouts along with the service. They described a
+                    // live link; after a stop they were stale data wearing a
+                    // fresh "Stopped" label.
+                    batteryPercent = null
+                    currentModeName = "—"
                     broadcastStatus(status, "Stopped")
                     try { btSocket?.close() } catch (_: Exception) {}
                     stopSelf()
@@ -657,11 +662,15 @@ class BluetoothAncService : Service() {
                     broadcastStatus(status, "Connecting…")
                     updateNotification("Connecting…")
 
-                    // Cancel discovery — required before RFCOMM on Android
+                    // Cancel discovery — required before RFCOMM on Android. And
+                    // give the stack a moment afterwards: an RFCOMM connect fired
+                    // into a just-cancelled discovery is refused on the first
+                    // try more often than not.
                     try {
                         if (adapter.isDiscovering) {
                             adapter.cancelDiscovery()
                             Log.d(tag, "Cancelled BT discovery before socket creation")
+                            delay(500L)
                         }
                     } catch (_: Exception) {}
 
@@ -679,14 +688,15 @@ class BluetoothAncService : Service() {
                     // already know which channel worked before, one attempt on
                     // that channel is enough — the full rotation used to burn
                     // half a minute paging a powered-off pair on every retry.
-                    val socket = connectSonyRfcomm(device, fullRotation = profileReady || lastGoodChannel == null)
-                    // Publish only once the channel is actually up. Assigning
-                    // first left a window where a concurrent sender (the 60s
-                    // poll, an ACTION_ intent, a media-state change) could pick
-                    // up a socket that was created but not yet connected, fail
-                    // its write, and take the whole in-flight connect down with
-                    // it -- which is what a lot of "first try" failures were.
-                    socket.connect()
+                    val socket = connectSonyRfcomm(
+                        device,
+                        profileReady = profileReady,
+                        fullRotation = profileReady || lastGoodChannel == null,
+                    )
+                    // connectSonyRfcomm only returns a socket whose connect() has
+                    // already succeeded, so publishing it here cannot expose a
+                    // merely-created socket to concurrent senders (the 60s poll,
+                    // an ACTION_ intent, a media-state change).
                     btSocket = socket
 
                     Log.d(tag, "Connected!")
@@ -746,6 +756,12 @@ class BluetoothAncService : Service() {
                         }
                     }
 
+
+                    // A short settle after channel establishment: the first query
+                    // fired into a just-opened socket was occasionally answered
+                    // too late for even the 800ms retry window, which looked like
+                    // a dead first connect.
+                    delay(150L)
 
                     // XM6 protocol handshake — required before the headphones accept 0x19 commands
                     Log.d(tag, "Handshake: protocol info")
@@ -809,6 +825,7 @@ class BluetoothAncService : Service() {
                         powerOffRequested = false
                         everConnected = false
                         status = Status.WAITING
+                        currentModeName = "—"
                         broadcastStatus(status, "Waiting — headphones powered off")
                         updateNotification("Waiting — headphones powered off")
                         refreshNotification()
@@ -859,9 +876,13 @@ class BluetoothAncService : Service() {
                         // skipped once the burst is spent: there is no upcoming
                         // attempt, and announcing "attempt 6 of 5" followed by a
                         // 48s wait that nothing survives was exactly that.
+                        // The reason rides along so "is it the headphones?" can be
+                        // answered from the card: "read failed" / "connection
+                        // refused" is the stack or the device, not a mystery.
+                        val reason = (e.message ?: e.javaClass.simpleName).take(60)
                         broadcastStatus(
                             status,
-                            "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES)",
+                            "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES) — $reason",
                         )
                         updateNotification("Reconnecting in ${delay / 1000}s…")
                         delay(delay)
@@ -887,6 +908,8 @@ class BluetoothAncService : Service() {
                 // WAITING says "the service is up and will pick them up" — which
                 // is what the button used to contradict by flipping back to Start.
                 everConnected = false
+                // The ANC mode described a live link; without one it is stale.
+                currentModeName = "—"
                 broadcastStatus(status, "Waiting for headphones")
                 updateNotification("Waiting for headphones")
                 startAbsentPoll(address)
@@ -935,17 +958,27 @@ class BluetoothAncService : Service() {
         when (cmd) {
             0x23, 0x25 -> {  // battery RET / NTFY (single battery)
                 if (p.size >= 3) {
-                    batteryPercent = p[2].toInt() and 0xFF
-                    Log.d(tag, "Battery: $batteryPercent%")
-                    refreshNotification()
-                    // Fire only on the crossing, not on every 60s poll — otherwise a
-                    // rule bound to "battery low" would re-run every minute.
-                    val low = batteryPercent!! < BATTERY_LOW_THRESHOLD
-                    if (low && !batteryLowFired) {
-                        batteryLowFired = true
-                        scope.launch { runAutomation(Automation.Trigger.BATTERY_LOW) }
-                    } else if (!low) {
-                        batteryLowFired = false
+                    val level = p[2].toInt() and 0xFF
+                    // Plausibility gate: 0 and >100 are not real battery levels.
+                    // A frame in this family with an unexpected layout read at
+                    // the same offset used to surface as a nonsense "0%" out of
+                    // nowhere. Keep the last good reading and log the frame so
+                    // the real layout can be learned from a capture.
+                    if (level in 1..100) {
+                        batteryPercent = level
+                        Log.d(tag, "Battery: $batteryPercent%")
+                        refreshNotification()
+                        // Fire only on the crossing, not on every 60s poll — otherwise a
+                        // rule bound to "battery low" would re-run every minute.
+                        val low = batteryPercent!! < BATTERY_LOW_THRESHOLD
+                        if (low && !batteryLowFired) {
+                            batteryLowFired = true
+                            scope.launch { runAutomation(Automation.Trigger.BATTERY_LOW) }
+                        } else if (!low) {
+                            batteryLowFired = false
+                        }
+                    } else {
+                        Log.w(tag, "Implausible battery value $level ignored — ${SonyMdrV2.hex(p)}")
                     }
                 }
             }
@@ -1399,23 +1432,59 @@ class BluetoothAncService : Service() {
      */
     private var lastGoodChannel: (() -> BluetoothSocket)? = null
 
-    private fun connectSonyRfcomm(device: BluetoothDevice, fullRotation: Boolean): BluetoothSocket {
+    /**
+     * Build socket candidates in preference order and drive each through
+     * [BluetoothSocket.connect], returning the first one that actually
+     * establishes a channel.
+     *
+     * Creating a socket proves nothing — neither that the channel exists nor
+     * that it is the MDR service — so "known-good" is recorded only after a
+     * connect succeeds, not when a factory merely produces an object.
+     */
+    private suspend fun connectSonyRfcomm(
+        device: BluetoothDevice,
+        profileReady: Boolean,
+        fullRotation: Boolean,
+    ): BluetoothSocket {
         val failures = mutableListOf<String>()
 
-        fun tryCreate(label: String, create: () -> BluetoothSocket): BluetoothSocket? = try {
-            val socket = create()
+        suspend fun drive(label: String, create: () -> BluetoothSocket): BluetoothSocket? {
+            val socket = try {
+                create()
+            } catch (e: Exception) {
+                failures += "create $label: ${e.message}"
+                return null
+            }
             Log.d(tag, "Using socket from $label")
-            lastGoodChannel = create
-            socket
-        } catch (e: Exception) {
-            failures += "create $label: ${e.message}"
-            null
+            try {
+                socket.connect()
+                return socket
+            } catch (e: IOException) {
+                failures += "connect $label: ${e.message}"
+                try { socket.close() } catch (_: Exception) {}
+                return null
+            }
         }
 
         // The channel that produced the last working link goes first, so a
         // reconnect does not re-probe every factory.
         lastGoodChannel?.let { create ->
-            tryCreate("last known-good channel", create)?.let { return it }
+            var socket = drive("last known-good channel", create)
+            if (socket == null && profileReady) {
+                // The stack occasionally refuses the first channel open right
+                // after a link state change, then accepts the identical attempt
+                // a moment later — the "first try fails, second works" pattern.
+                // Retry it once inside this attempt, before the slower backoff
+                // path gets a say. Gated on the profile probe so a powered-off
+                // pair is not paged twice per round.
+                Log.d(tag, "First open refused on the known-good channel — retrying once")
+                delay(600L)
+                socket = drive("last known-good channel (retry)", create)
+            }
+            if (socket != null) {
+                lastGoodChannel = create
+                return socket
+            }
         }
 
         if (!fullRotation) {
@@ -1430,16 +1499,20 @@ class BluetoothAncService : Service() {
             val uuid = UUID.fromString(uuidStr)
             for (secure in listOf(true, false)) {
                 val label = (if (secure) "" else "insecure ") + uuidStr
-                val socket = tryCreate(label) {
+                val create: () -> BluetoothSocket = {
                     if (secure) device.createRfcommSocketToServiceRecord(uuid)
                     else device.createInsecureRfcommSocketToServiceRecord(uuid)
                 }
-                if (socket != null) return socket
+                val socket = drive(label, create)
+                if (socket != null) {
+                    lastGoodChannel = create
+                    return socket
+                }
             }
         }
 
-        // No UUID produced a socket. Only now is trying channels safe, because
-        // there is nothing known-good left to prefer.
+        // No UUID produced a connected channel. Only now is trying channels
+        // safe, because there is nothing known-good left to prefer.
         val channels = intArrayOf(1, 10, 2, 3, 5, 15, 20)
         val createCh = try {
             device.javaClass.getMethod("createRfcommSocket", Int::class.java)
@@ -1447,13 +1520,15 @@ class BluetoothAncService : Service() {
             throw IOException("No RFCOMM strategy available: ${e.message}", e)
         }
         for (ch in channels) {
-            val socket = tryCreate("reflection channel $ch") {
-                createCh.invoke(device, ch) as BluetoothSocket
+            val create: () -> BluetoothSocket = { createCh.invoke(device, ch) as BluetoothSocket }
+            val socket = drive("reflection channel $ch", create)
+            if (socket != null) {
+                lastGoodChannel = create
+                return socket
             }
-            if (socket != null) return socket
         }
 
-        throw IOException("No RFCOMM socket could be created — ${failures.joinToString("; ")}")
+        throw IOException("No RFCOMM channel accepted a connection — ${failures.joinToString("; ")}")
     }
 
     /**

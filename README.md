@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.83](https://img.shields.io/badge/version-1.83-blue)
+![v1.84](https://img.shields.io/badge/version-1.84-blue)
 
 ---
 
@@ -18,6 +18,7 @@
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification; both stay in sync
 - **🔄 Auto-reconnect** — Exponential backoff when Bluetooth drops, and a **Waiting** state once the headphones look absent: the service stays alive and picks them up the moment they return, instead of reading as "stopped"
+- **🧹 Clean stop** — stopping the service clears battery and mode readouts instead of leaving stale values on the card; impossible battery readings are ignored as protocol noise
 - **⚡ Retry now** — Skip the reconnect backoff with one tap on the Home card or the notification while the headphones are away
 
 ### Readouts — verified on hardware
