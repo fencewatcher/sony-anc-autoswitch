@@ -288,6 +288,7 @@ class BluetoothAncService : Service() {
                     // fresh "Stopped" label.
                     batteryPercent = null
                     currentModeName = "—"
+                    resetLinkState()
                     broadcastStatus(status, "Stopped")
                     try { btSocket?.close() } catch (_: Exception) {}
                     stopSelf()
@@ -854,6 +855,9 @@ class BluetoothAncService : Service() {
 
                     // Socket closed — reconnect automatically
                     btSocket = null
+                    // The link is gone; codec/LDAC, DSEE and wear described a
+                    // connection that no longer exists.
+                    resetLinkState()
 
                     if (!isRunning) {
                         // The user stopped the service — closing the socket is
@@ -2267,6 +2271,20 @@ class BluetoothAncService : Service() {
     /** Which upscaling variant the headset has selected, or null until reported. */
     var upscalingEffect: Int? = null
         private set
+
+    /**
+     * Clear the readouts that describe the live link — codec/LDAC, DSEE, wear —
+     * so a disconnected card shows unknown instead of the last connection's
+     * state. Battery keeps its last reading while waiting (it drains slowly and
+     * is genuinely useful there); the mode is cleared separately.
+     */
+    private fun resetLinkState() {
+        activeCodec = null
+        ldacActive = null
+        dseeExtreme = false
+        wearStatusCode = null
+        headphonesWorn = null
+    }
 
     private fun applyWearCode(code: Int) {
         val changed = code != wearStatusCode

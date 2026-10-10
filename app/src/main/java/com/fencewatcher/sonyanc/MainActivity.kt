@@ -299,6 +299,17 @@ class MainActivity : AppCompatActivity() {
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
                 updateCardStats()
                 if (!serviceRunning) updateHeroTitle()
+                // Link-derived readouts die with the link: codec/LDAC, DSEE and
+                // the wear glyph describe a live connection only. Without this
+                // they lingered across disconnects, since the service stops
+                // sending their extras and nothing else ever cleared them.
+                if (s != BluetoothAncService.Status.CONNECTED) {
+                    activeCodec = null
+                    ldacActive = null
+                    dseeExtreme = false
+                    headphonesWorn = null
+                    markRenderDirty()
+                }
             }
             // EQ state from service. Everything the display needs — editability,
             // curve sync, pending-write resolution — lives in updateEQStatus.
