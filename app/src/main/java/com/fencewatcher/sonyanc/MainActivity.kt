@@ -1625,11 +1625,11 @@ class MainActivity : AppCompatActivity() {
         if (pairedDevices.isEmpty()) {
             binding.textModel.text = "No headphones"; binding.textModelSub.text = ""
             updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
-            updateModelArt("")
+            updateModelArt(false)
         } else {
             updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
             updateHeroTitle()
-            updateModelArt(pairedDevices.first().name)
+            updateModelArt(true)
         }
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -1640,13 +1640,15 @@ class MainActivity : AppCompatActivity() {
     // ---- Model artwork ----
 
     /**
-     * Swap the hero image for the connected model, falling back to the vector icon
-     * for unrecognised names. Product shots
+     * The hero artwork follows the *model*, not the Bluetooth name — the name
+     * is the user's own and rarely contains the model string. The app speaks
+     * XM6 and nothing else, so any paired device gets the XM6 artwork; the
+     * generic icon only appears when there is nothing paired. Product shots
      * live in drawable-nodpi so they are not rescaled per screen density.
      */
-    private fun updateModelArt(name: String) {
+    private fun updateModelArt(hasDevice: Boolean) {
         binding.imageModel.setImageResource(
-            if (name.contains("XM6", ignoreCase = true)) R.drawable.model_xm6 else R.drawable.ic_headphones_big
+            if (hasDevice) R.drawable.model_xm6 else R.drawable.ic_headphones_big
         )
     }
 
