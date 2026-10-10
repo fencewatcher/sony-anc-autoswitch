@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.85](https://img.shields.io/badge/version-1.85-blue)
+![v1.86](https://img.shields.io/badge/version-1.86-blue)
 
 ---
 
@@ -33,7 +33,7 @@
 - **🎛️ Visual EQ** — Drag the frequency response curve (10 bands, 31 Hz–16 kHz, ±6 dB)
   - 8 presets: Off, Heavy, Clear, Hard, Soft, Custom, User 1, User 2
   - Write custom bands to Custom, User 1 or User 2
-  - EQ state read back from the headphones — sliders show the actual current curve
+  - EQ state read back from the headphones — the curve always shows what's actually set; editing is enabled only while an editable slot (Custom/User) is selected, and the status label holds steady through a write instead of flickering between values
 - **📶 Multipoint** — List paired devices with connected/active indicators (connected first), switch the active source, lock playback, unpair
 - **🖐️ Quick Access** — Choose what a double- or triple-press of the [NC/AMB] button launches
 - **⏻ Power off** — Shut the headphones down from the app

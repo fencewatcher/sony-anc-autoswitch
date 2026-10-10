@@ -1044,6 +1044,7 @@ class BluetoothAncService : Service() {
             0x57, 0x59 -> {  // EQ RET / NTFY: pid, subtype, presetID, count, values…
                 val presetId = if (p.size >= 3) p[2].toInt() and 0xFF else 0
                 val bandCount = if (p.size >= 4) p[3].toInt() and 0xFF else 0
+                eqStateKnown = true
                 eqActivePreset = presetId
                 if (bandCount > 0 && p.size >= 4 + bandCount) {
                     val bands = p.copyOfRange(4, 4 + bandCount)
@@ -2156,6 +2157,13 @@ class BluetoothAncService : Service() {
     var eqActiveBands: IntArray? = null
         private set
 
+    /**
+     * True once the headset has actually reported EQ state. Until then the
+     * zero default would be broadcast as a confident "Off (Flat)" that nobody
+     * on the device had selected.
+     */
+    private var eqStateKnown = false
+
     // Multipoint device list from PERIPHERAL NTFY
     var connectedDevices: List<MultipointDevice> = emptyList()
         private set
@@ -2312,8 +2320,13 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
-            putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
-            eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
+            // Only once the headset has actually reported EQ state — before
+            // that, the zero default read as a confident "Off (Flat)" that
+            // nobody on the device had selected.
+            if (eqStateKnown) {
+                putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
+                eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
+            }
             if (connectedDevices.isNotEmpty()) {
                 putExtra(EXTRA_DEVICE_LIST, connectedDevices.map { it.name }.toTypedArray())
                 putExtra(EXTRA_DEVICE_MACS, connectedDevices.map { it.mac }.toTypedArray())

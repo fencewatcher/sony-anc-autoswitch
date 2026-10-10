@@ -108,6 +108,16 @@ class MainActivity : AppCompatActivity() {
     private var eqActivePreset = 0
     private var eqActiveBands: IntArray? = null
 
+    // Pending EQ write: holds the status label on what is being applied until
+    // the headset confirms it (matching preset, and matching bands for a
+    // custom write) or the window expires. Without the hold, every unrelated
+    // stats broadcast re-rendered the *old* preset in between and the label
+    // appeared to jump back and forth.
+    private var eqPendingId: Int? = null
+    private var eqPendingBands: IntArray? = null
+    private var eqPendingAt = 0L
+    private val eqPendingTimeoutMs = 5_000L
+
     // Headphone feature state (mirrored from the service broadcasts)
     private var peripheralSupported = false
     private var speakToChat = false
@@ -281,28 +291,12 @@ class MainActivity : AppCompatActivity() {
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
                 updateCardStats()
             }
-            // EQ state from service
+            // EQ state from service. Everything the display needs — editability,
+            // curve sync, pending-write resolution — lives in updateEQStatus.
             if (intent?.hasExtra(EXTRA_EQ_ACTIVE_PRESET) == true) {
                 eqActivePreset = intent.getIntExtra(EXTRA_EQ_ACTIVE_PRESET, 0)
                 eqActiveBands = intent.getIntArrayExtra(EXTRA_EQ_ACTIVE_BANDS)
                 updateEQStatus()
-                // Gate editing on the preset the headset actually has selected.
-                // The graph view defaults to interactive and nothing called
-                // selectPreset() at startup, so on a cold launch the curve could be
-                // dragged even when the live preset was one of Sony's fixed ones,
-                // and dragging a preset that cannot be written is a no-op the user
-                // cannot see the reason for.
-                val editable = EQPreset.isEditable(eqActivePreset)
-                binding.eqGraph.interactive = editable
-                binding.btnApplyCustomEQ.visibility =
-                    if (editable) View.VISIBLE else View.GONE
-                if (editable) {
-                    val src = eqActiveBands
-                    if (src != null && src.size == 10) {
-                        for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
-                        binding.eqGraph.bandValues = eqBandValues
-                    }
-                }
             }
 
             // Codec and wear ride on their own broadcasts, unrelated to the
@@ -500,9 +494,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQClear.setOnClickListener { selectPreset(0x31) }
         binding.btnEQHard.setOnClickListener { selectPreset(0x32) }
         binding.btnEQSoft.setOnClickListener { selectPreset(0x33) }
-        binding.btnEQCustom.setOnClickListener { selectEditablePreset(0xA0, "Custom") }
-        binding.btnEQUser1.setOnClickListener { selectEditablePreset(0xA1, "User 1") }
-        binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2, "User 2") }
+        binding.btnEQCustom.setOnClickListener { selectEditablePreset(0xA0) }
+        binding.btnEQUser1.setOnClickListener { selectEditablePreset(0xA1) }
+        binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2) }
         binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
 
         // ---- Multipoint ----
@@ -1412,53 +1406,100 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectPreset(presetId: Int) {
         if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
-        val preset = EQPreset.fromId(presetId)
-        binding.textEQStatus.text = "↻ ${preset.displayName}"
         selectedEQProfile = presetId
+        eqPendingId = presetId
+        eqPendingBands = null
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
         sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, presetId) }
-        binding.eqGraph.interactive = false
-        binding.btnApplyCustomEQ.visibility = View.GONE
-        Handler(Looper.getMainLooper()).postDelayed({
-            binding.textEQStatus.text = preset.displayName
-        }, 2000)
+        updateEQStatus()
     }
 
-    private fun selectEditablePreset(profileId: Int, label: String) {
+    private fun selectEditablePreset(profileId: Int) {
+        if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
         selectedEQProfile = profileId
-        // Sync current eqBandValues to graph
-        binding.eqGraph.bandValues = eqBandValues
-        if (BluetoothAncService.isRunning) {
-            binding.textEQStatus.text = "↻ $label — drag curve then Write"
-            sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, profileId) }
-        }
-        binding.eqGraph.interactive = true
-        binding.btnApplyCustomEQ.visibility = View.VISIBLE
-        binding.btnApplyCustomEQ.text = "Write to $label"
+        eqPendingId = profileId
+        eqPendingBands = null
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
+        sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, profileId) }
+        updateEQStatus()
     }
 
     private fun applyCustomEQ() {
         if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
-        // Read values from graph view for Apply
-        val presetName = EQPreset.fromId(selectedEQProfile).displayName
-        binding.textEQStatus.text = "↻ Writing $presetName..."
-        sendToService(ACTION_SET_EQ_CUSTOM) { 
+        eqPendingId = selectedEQProfile
+        eqPendingBands = binding.eqGraph.bandValues.copyOf()
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
+        sendToService(ACTION_SET_EQ_CUSTOM) {
             putExtra(EXTRA_EQ_BANDS, binding.eqGraph.bandValues)
             putExtra(EXTRA_EQ_PRESET, selectedEQProfile)
         }
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (binding.textEQStatus.text.startsWith("↻")) updateEQStatus()
-        }, 3000)
+        updateEQStatus()
     }
 
+    /**
+     * Single renderer for the EQ status line, the curve and the preset-button
+     * highlight. Everything is derived from the headset's actual reported
+     * state, with a pending-write window so a label cannot be flipped back to
+     * the old preset by an unrelated stats broadcast in mid-write.
+     */
     private fun updateEQStatus() {
-        val preset = EQPreset.fromId(eqActivePreset)
+        val actual = eqActivePreset
         val bands = eqActiveBands
-        binding.textEQStatus.text = if (bands != null && bands.size == 10) {
-            "${preset.displayName} [${bands.joinToString(" ") { "%+d".format(it) }}]"
-        } else {
-            preset.displayName
+
+        // Resolve the pending write: the preset arrived, and for a custom
+        // write the reported bands match what was sent — or the window gave
+        // up and the actual state takes over again.
+        val pending = eqPendingId
+        val expired = pending != null &&
+            android.os.SystemClock.elapsedRealtime() - eqPendingAt > eqPendingTimeoutMs
+        val arrived = pending != null && pending == actual &&
+            (eqPendingBands == null ||
+                (bands != null && bands.size == 10 && bands.contentEquals(eqPendingBands)))
+        if (expired || arrived) {
+            eqPendingId = null
+            eqPendingBands = null
+        }
+
+        // Editing is only possible while the headset has an editable slot
+        // (Custom / User 1-5) selected. The curve still renders what the
+        // headset reports — dimmed and non-interactive otherwise, so "what is
+        // set" stays visible without inviting writes that cannot happen.
+        val editable = EQPreset.isEditable(actual)
+        binding.eqGraph.interactive = editable
+        binding.btnApplyCustomEQ.visibility = if (editable) View.VISIBLE else View.GONE
+        binding.btnApplyCustomEQ.text = "Write to ${eqLabel(actual)}"
+        bands?.takeIf { it.size == 10 }?.let { src ->
+            for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
+            binding.eqGraph.bandValues = eqBandValues
+        }
+
+        // The preset buttons highlight what the headset actually has — or,
+        // inside the pending window, what it is about to have — not the last
+        // button that happened to be tapped.
+        val highlightId = eqPendingId ?: actual
+        val buttons = mapOf(
+            0x00 to binding.btnEQOff, 0x30 to binding.btnEQHeavy,
+            0x31 to binding.btnEQClear, 0x32 to binding.btnEQHard,
+            0x33 to binding.btnEQSoft, 0xA0 to binding.btnEQCustom,
+            0xA1 to binding.btnEQUser1, 0xA2 to binding.btnEQUser2,
+        )
+        for ((id, button) in buttons) button.alpha = if (id == highlightId) 1f else 0.55f
+
+        binding.textEQStatus.text = when {
+            eqPendingId != null && eqPendingId != actual ->
+                "↻ Applying ${eqLabel(eqPendingId!!)}…"
+            eqPendingId != null ->
+                "↻ Writing ${eqLabel(eqPendingId!!)}…"
+            bands != null && bands.size == 10 ->
+                "${eqLabel(actual)} [${bands.joinToString(" ") { "%+d".format(it) }}]"
+            else -> eqLabel(actual)
         }
     }
+
+    /** Label for a preset id without inventing a preset that is not one. */
+    private fun eqLabel(id: Int): String =
+        EQPreset.entries.firstOrNull { it.id == id }?.displayName
+            ?: "Unknown (0x%02x)".format(id)
 
     // ---- Per-device settings ----
 
