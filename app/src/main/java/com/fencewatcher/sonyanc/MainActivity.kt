@@ -1562,11 +1562,14 @@ class MainActivity : AppCompatActivity() {
             ?: pairedDevices.firstOrNull()?.name?.takeIf { it.isNotBlank() }
             ?: "WH-1000XM6"
         binding.textModel.text = name
-        // Subtitle only when it adds information: an empty TextView still
-        // occupies its line, which read as a random gap under the title.
+        // Subtitle only when it adds information. The name usually mentions
+        // the model already ("hbubli's WH-1000XM6"), so *containing* the model
+        // string hides it — equality alone left the model printed twice. And
+        // an empty TextView still occupies its line, hence the visibility
+        // toggle rather than empty text.
         binding.textModelSub.text = "WH-1000XM6"
         binding.textModelSub.visibility =
-            if (name.equals("WH-1000XM6", ignoreCase = true)) View.GONE else View.VISIBLE
+            if (name.contains("WH-1000XM6", ignoreCase = true)) View.GONE else View.VISIBLE
     }
 
     /** The app speaks the XM6 protocol and nothing else. */
