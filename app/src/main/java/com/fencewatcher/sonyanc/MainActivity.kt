@@ -1562,9 +1562,11 @@ class MainActivity : AppCompatActivity() {
             ?: pairedDevices.firstOrNull()?.name?.takeIf { it.isNotBlank() }
             ?: "WH-1000XM6"
         binding.textModel.text = name
-        // Skip the subtitle when the Bluetooth name already is the model.
-        binding.textModelSub.text =
-            if (name.equals("WH-1000XM6", ignoreCase = true)) "" else "WH-1000XM6"
+        // Subtitle only when it adds information: an empty TextView still
+        // occupies its line, which read as a random gap under the title.
+        binding.textModelSub.text = "WH-1000XM6"
+        binding.textModelSub.visibility =
+            if (name.equals("WH-1000XM6", ignoreCase = true)) View.GONE else View.VISIBLE
     }
 
     /** The app speaks the XM6 protocol and nothing else. */
@@ -1609,12 +1611,16 @@ class MainActivity : AppCompatActivity() {
         ) { updateCardStatus("Permission needed"); binding.btnToggle.isEnabled = false; return }
 
         for (d in (adapter.bondedDevices ?: emptySet())) {
-            val name = d.name ?: ""
+            // The alias — a local rename some Bluetooth settings offer — is what
+            // the user actually sees in Settings; prefer it over the advertised
+            // name.
+            val display = HeadphoneProfile.bluetoothDisplayName(d) ?: d.name ?: ""
             // XM6 only. An XM5 shares the XM6 service UUID but speaks the wrong
             // protocol; listing it would start a service that half-works. The
             // service refuses an XM5 by name as a second gate.
-            if (name.contains("WH-1000XM", ignoreCase = true) && !name.contains("XM5", ignoreCase = true))
-                pairedDevices.add(DeviceInfo(name, d.address))
+            if ((display + " " + (d.name ?: "")).contains("WH-1000XM", ignoreCase = true) &&
+                !display.contains("XM5", ignoreCase = true)
+            ) pairedDevices.add(DeviceInfo(display, d.address))
         }
         if (pairedDevices.isEmpty()) {
             binding.textModel.text = "No headphones"; binding.textModelSub.text = ""

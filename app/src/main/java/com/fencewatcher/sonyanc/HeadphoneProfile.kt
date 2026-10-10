@@ -67,4 +67,23 @@ object HeadphoneProfile {
      * service — it would open a socket and then speak the wrong protocol.
      */
     val allUuids = listOf(serviceUuid, LEGACY_UUID).distinct()
+
+    /**
+     * The user-visible name of a Bluetooth device: the local alias when one
+     * was set — some phones' Bluetooth settings rename a paired device locally,
+     * and the alias is exactly what Android Settings then shows — otherwise
+     * the advertised name. Returns null when neither is known.
+     *
+     * getAlias is not in the public SDK on all versions, so it is read
+     * reflectively and simply skipped when the platform does not have it.
+     */
+    fun bluetoothDisplayName(device: android.bluetooth.BluetoothDevice): String? {
+        val alias = try {
+            device.javaClass.getMethod("getAlias").invoke(device) as? String
+        } catch (_: Exception) {
+            null
+        }
+        return alias?.takeIf { it.isNotBlank() }
+            ?: device.name?.takeIf { it.isNotBlank() }
+    }
 }

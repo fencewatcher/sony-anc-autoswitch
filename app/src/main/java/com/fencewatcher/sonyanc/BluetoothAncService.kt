@@ -650,7 +650,7 @@ class BluetoothAncService : Service() {
                     // would open and then speak the wrong protocol — the broken
                     // connections and wrong readouts that led to XM5 support being
                     // scrapped in v1.83. Refuse it politely instead of half-working.
-                    deviceName = device.name ?: ""
+                    deviceName = HeadphoneProfile.bluetoothDisplayName(device) ?: ""
                     if (deviceName.contains("XM5", ignoreCase = true)) {
                         Log.w(tag, "WH-1000XM5 detected — not supported")
                         status = Status.ERROR
@@ -723,19 +723,25 @@ class BluetoothAncService : Service() {
                     broadcastStatus(status, "Connected")
 
                     // The Bluetooth stack refreshes the remote name when a link
-                    // comes up; a rename that happened while paired can land a
-                    // few seconds late — or not at all while a link persists,
-                    // which is how the Home card ended up showing the old model
-                    // name over a freshly renamed pair. Re-read once after the
-                    // link has settled and re-broadcast if the name moved.
+                    // comes up, but some stacks keep serving the cached name
+                    // until an SDP lookup nudges them — a rename that happened
+                    // while paired then never lands, and the Home card keeps
+                    // showing the old model name. Kick one off and re-read the
+                    // name a few times over the next half minute.
+                    runCatching { device.fetchUuidsWithSdp() }
                     scope.launch {
-                        delay(5_000L)
-                        if (!isActive || !isRunning) return@launch
-                        val fresh = try { adapter.getRemoteDevice(address).name } catch (_: Exception) { null }
-                        if (!fresh.isNullOrBlank() && fresh != deviceName) {
-                            Log.d(tag, "Device name refreshed: '$deviceName' -> '$fresh'")
-                            deviceName = fresh
-                            broadcastStats()
+                        for (extraWaitMs in listOf(3_000L, 7_000L, 15_000L)) {
+                            delay(extraWaitMs)
+                            if (!isActive || !isRunning) return@launch
+                            val fresh = HeadphoneProfile.bluetoothDisplayName(
+                                adapter.getRemoteDevice(address),
+                            )
+                            if (!fresh.isNullOrBlank() && fresh != deviceName) {
+                                Log.d(tag, "Device name refreshed: '$deviceName' -> '$fresh'")
+                                deviceName = fresh
+                                broadcastStats()
+                                return@launch
+                            }
                         }
                     }
                     updateNotification("Connected")
