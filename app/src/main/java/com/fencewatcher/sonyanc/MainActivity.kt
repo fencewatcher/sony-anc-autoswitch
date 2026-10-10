@@ -47,6 +47,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_MACS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MULTI_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_ACTIVE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_CONNECTED
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_NAME
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SPEAK_TO_CHAT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
@@ -242,6 +243,10 @@ class MainActivity : AppCompatActivity() {
     private var multiActive: BooleanArray = BooleanArray(0)
     private var multiConnected: BooleanArray = BooleanArray(0)
 
+    /** The service's live view of the connected device's Bluetooth name; fresher
+     *  than the bonded cache, which only updates when the headphones reconnect. */
+    private var serviceName: String? = null
+
     /** Guards switch/spinner listeners while we push service state into the UI. */
     private var updatingUi = false
     private var autoPowerSpinnerReady = false
@@ -286,10 +291,14 @@ class MainActivity : AppCompatActivity() {
                 ) {
                     battery = null
                     currentMode = "—"
+                    // The live name belonged to the (now stopped) connection;
+                    // fall back to the bonded cache again.
+                    serviceName = null
                 }
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
                 updateCardStats()
+                if (!serviceRunning) updateHeroTitle()
             }
             // EQ state from service. Everything the display needs — editability,
             // curve sync, pending-write resolution — lives in updateEQStatus.
@@ -297,6 +306,13 @@ class MainActivity : AppCompatActivity() {
                 eqActivePreset = intent.getIntExtra(EXTRA_EQ_ACTIVE_PRESET, 0)
                 eqActiveBands = intent.getIntArrayExtra(EXTRA_EQ_ACTIVE_BANDS)
                 updateEQStatus()
+            }
+
+            // The service's live view of the connected device's Bluetooth name —
+            // fresher than the bonded cache, which only updates on a reconnect.
+            if (intent?.hasExtra(EXTRA_DEVICE_NAME) == true) {
+                serviceName = intent.getStringExtra(EXTRA_DEVICE_NAME)
+                updateHeroTitle()
             }
 
             // Codec and wear ride on their own broadcasts, unrelated to the
@@ -1535,11 +1551,16 @@ class MainActivity : AppCompatActivity() {
      * The hero title is the headphones' Bluetooth name — the user's own name
      * for them — with the model demoted to a small subtitle underneath: the
      * app speaks XM6 and nothing else, so the model alone says little.
+     *
+     * The name prefers the service's live view of the connection. The bonded
+     * cache only refreshes when the headphones reconnect, so a rename that
+     * happened while paired would otherwise keep showing the old model name.
      */
     private fun updateHeroTitle() {
-        val device = pairedDevices.getOrNull(binding.spinnerDevice.selectedItemPosition)
-            ?: pairedDevices.firstOrNull()
-        val name = device?.name?.takeIf { it.isNotBlank() } ?: "WH-1000XM6"
+        val name = serviceName?.takeIf { it.isNotBlank() }
+            ?: pairedDevices.getOrNull(binding.spinnerDevice.selectedItemPosition)?.name?.takeIf { it.isNotBlank() }
+            ?: pairedDevices.firstOrNull()?.name?.takeIf { it.isNotBlank() }
+            ?: "WH-1000XM6"
         binding.textModel.text = name
         // Skip the subtitle when the Bluetooth name already is the model.
         binding.textModelSub.text =

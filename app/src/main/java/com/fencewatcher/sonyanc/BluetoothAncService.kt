@@ -721,6 +721,23 @@ class BluetoothAncService : Service() {
                     status = Status.CONNECTED
                     headphonesAbsent = false
                     broadcastStatus(status, "Connected")
+
+                    // The Bluetooth stack refreshes the remote name when a link
+                    // comes up; a rename that happened while paired can land a
+                    // few seconds late — or not at all while a link persists,
+                    // which is how the Home card ended up showing the old model
+                    // name over a freshly renamed pair. Re-read once after the
+                    // link has settled and re-broadcast if the name moved.
+                    scope.launch {
+                        delay(5_000L)
+                        if (!isActive || !isRunning) return@launch
+                        val fresh = try { adapter.getRemoteDevice(address).name } catch (_: Exception) { null }
+                        if (!fresh.isNullOrBlank() && fresh != deviceName) {
+                            Log.d(tag, "Device name refreshed: '$deviceName' -> '$fresh'")
+                            deviceName = fresh
+                            broadcastStats()
+                        }
+                    }
                     updateNotification("Connected")
                     currentSeq = 0       // Reset seq on every fresh connection
                     connectFailures = 0   // Reset the failure count on success
@@ -2311,6 +2328,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
             `package` = packageName
         }
         try {
@@ -2328,6 +2346,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
             // Only once the headset has actually reported EQ state — before
             // that, the zero default read as a confident "Off (Flat)" that
             // nobody on the device had selected.
@@ -2493,6 +2512,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_DEVICE_MACS = "device_macs"
         const val EXTRA_DEVICE_ACTIVE = "device_active"
         const val EXTRA_DEVICE_CONNECTED = "device_connected"
+        const val EXTRA_DEVICE_NAME = "device_name"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast

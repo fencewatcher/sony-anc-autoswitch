@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.87](https://img.shields.io/badge/version-1.87-blue)
+![v1.88](https://img.shields.io/badge/version-1.88-blue)
 
 ---
 
