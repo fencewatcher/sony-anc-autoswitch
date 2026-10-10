@@ -619,7 +619,7 @@ class BluetoothAncService : Service() {
         connectionJob?.cancel()
         connectionJob = scope.launch {
 
-            while (isActive && connectFailures < MAX_RETRIES) {
+            while (isActive && isRunning && connectFailures < MAX_RETRIES) {
                 connectInProgress = true
                 try {
                     val adapter = BluetoothAdapter.getDefaultAdapter()
@@ -697,6 +697,15 @@ class BluetoothAncService : Service() {
                     // already succeeded, so publishing it here cannot expose a
                     // merely-created socket to concurrent senders (the 60s poll,
                     // an ACTION_ intent, a media-state change).
+                    if (!isRunning) {
+                        // A stop raced this connect and the channel came up
+                        // anyway. The service is on its way out — do not announce
+                        // a connection that is about to be closed.
+                        try { socket.close() } catch (_: Exception) {}
+                        status = Status.DISCONNECTED
+                        broadcastStatus(status, "Stopped")
+                        return@launch
+                    }
                     btSocket = socket
 
                     Log.d(tag, "Connected!")
@@ -816,6 +825,16 @@ class BluetoothAncService : Service() {
                     // Socket closed — reconnect automatically
                     btSocket = null
 
+                    if (!isRunning) {
+                        // The user stopped the service — closing the socket is
+                        // what unblocked this loop. Without this guard the stop
+                        // raced the read loop and the card was left stuck on
+                        // "Reconnecting…" for a reconnect that would never run.
+                        status = Status.DISCONNECTED
+                        broadcastStatus(status, "Stopped")
+                        return@launch
+                    }
+
                     if (powerOffRequested) {
                         // The user turned the headphones off on purpose. Do not
                         // treat the resulting disconnect as a fault. Keep the
@@ -848,6 +867,14 @@ class BluetoothAncService : Service() {
                 } catch (e: Exception) {
                     Log.w(tag, "BT error: ${e.javaClass.simpleName}: ${e.message}")
                     if (!isActive) break
+                    if (!isRunning) {
+                        // Stopped mid-attempt: the socket close is what failed
+                        // this connect, and the "Stopped" broadcast already went
+                        // out with the stop. No reconnect message, no retries —
+                        // broadcasting here is what left the card stuck on
+                        // "Reconnecting…" after a stop.
+                        break
+                    }
 
                     // Cleared before the backoff, not after: the wait is exactly
                     // when the headphones are most likely to come back, and an
@@ -898,21 +925,32 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            if (!isActive) {
-                status = Status.DISCONNECTED
-                broadcastStatus(status)
-                updateNotification("Stopped")
-            } else {
-                status = Status.WAITING
-                // Not a fault: most often the headphones are simply powered off.
-                // WAITING says "the service is up and will pick them up" — which
-                // is what the button used to contradict by flipping back to Start.
-                everConnected = false
-                // The ANC mode described a live link; without one it is stale.
-                currentModeName = "—"
-                broadcastStatus(status, "Waiting for headphones")
-                updateNotification("Waiting for headphones")
-                startAbsentPoll(address)
+            when {
+                !isActive -> {
+                    status = Status.DISCONNECTED
+                    broadcastStatus(status)
+                    updateNotification("Stopped")
+                }
+                !isRunning -> {
+                    // The burst outlived the service (stop mid-retry). The
+                    // WAITING state and the slow poll belong to a running
+                    // service; a stopped one goes quiet with the stop it
+                    // already announced.
+                    status = Status.DISCONNECTED
+                    broadcastStatus(status, "Stopped")
+                }
+                else -> {
+                    status = Status.WAITING
+                    // Not a fault: most often the headphones are simply powered off.
+                    // WAITING says "the service is up and will pick them up" — which
+                    // is what the button used to contradict by flipping back to Start.
+                    everConnected = false
+                    // The ANC mode described a live link; without one it is stale.
+                    currentModeName = "—"
+                    broadcastStatus(status, "Waiting for headphones")
+                    updateNotification("Waiting for headphones")
+                    startAbsentPoll(address)
+                }
             }
         }
     }
@@ -932,7 +970,7 @@ class BluetoothAncService : Service() {
     private fun startAbsentPoll(address: String) {
         slowPollJob?.cancel()
         slowPollJob = scope.launch {
-            while (isActive && btSocket == null) {
+            while (isActive && isRunning && btSocket == null) {
                 delay(ABSENT_RETRY_MS)
                 if (!isActive || btSocket != null) break
                 // A burst may already be running from an earlier round.
@@ -1948,6 +1986,10 @@ class BluetoothAncService : Service() {
     private data class MdrFrame(val dataType: Int, val sequence: Int, val payload: ByteArray)
 
     private fun triggerReconnect() {
+        // A stop closes the socket, which fires reconnect requests from the
+        // read-loop teardown and failed writes. Guard here so a stopped service
+        // cannot schedule a connect cycle it will never want.
+        if (!isRunning) return
         val addr = deviceAddress ?: return
         // First close old socket to unblock the read() loop
         try {
@@ -2277,6 +2319,7 @@ class BluetoothAncService : Service() {
                 putExtra(EXTRA_DEVICE_MACS, connectedDevices.map { it.mac }.toTypedArray())
                 putExtra(EXTRA_MULTI_STATUS, multiStatus)
                 putExtra(EXTRA_DEVICE_ACTIVE, connectedDevices.map { it.isActive }.toBooleanArray())
+                putExtra(EXTRA_DEVICE_CONNECTED, connectedDevices.map { it.isConnected }.toBooleanArray())
             }
             putExtra(EXTRA_PERIPHERAL_OK, peripheralSupported)
             putExtra(EXTRA_AUTO_POWER_MODE, autoPowerOffMode)
@@ -2428,6 +2471,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_MULTI_STATUS = "multi_status"
         const val EXTRA_DEVICE_MACS = "device_macs"
         const val EXTRA_DEVICE_ACTIVE = "device_active"
+        const val EXTRA_DEVICE_CONNECTED = "device_connected"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast

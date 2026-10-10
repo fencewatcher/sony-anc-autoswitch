@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.84](https://img.shields.io/badge/version-1.84-blue)
+![v1.85](https://img.shields.io/badge/version-1.85-blue)
 
 ---
 
@@ -34,7 +34,7 @@
   - 8 presets: Off, Heavy, Clear, Hard, Soft, Custom, User 1, User 2
   - Write custom bands to Custom, User 1 or User 2
   - EQ state read back from the headphones — sliders show the actual current curve
-- **📶 Multipoint** — List paired devices, see the active source, switch, connect/disconnect, unpair
+- **📶 Multipoint** — List paired devices with connected/active indicators (connected first), switch the active source, lock playback, unpair
 - **🖐️ Quick Access** — Choose what a double- or triple-press of the [NC/AMB] button launches
 - **⏻ Power off** — Shut the headphones down from the app
 - **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Home tab

@@ -46,6 +46,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_LIST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_MACS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MULTI_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_ACTIVE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_CONNECTED
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SPEAK_TO_CHAT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
@@ -229,6 +230,7 @@ class MainActivity : AppCompatActivity() {
     private var multiNames: Array<String> = emptyArray()
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
+    private var multiConnected: BooleanArray = BooleanArray(0)
 
     /** Guards switch/spinner listeners while we push service state into the UI. */
     private var updatingUi = false
@@ -342,6 +344,7 @@ class MainActivity : AppCompatActivity() {
                     multiNames = intent.getStringArrayExtra(EXTRA_DEVICE_LIST) ?: emptyArray()
                     multiMacs = intent.getStringArrayExtra(EXTRA_DEVICE_MACS) ?: emptyArray()
                     multiActive = intent.getBooleanArrayExtra(EXTRA_DEVICE_ACTIVE) ?: BooleanArray(0)
+                    multiConnected = intent.getBooleanArrayExtra(EXTRA_DEVICE_CONNECTED) ?: BooleanArray(0)
                 }
                 speakToChat = intent.getBooleanExtra(EXTRA_SPEAK_TO_CHAT, false)
                 pauseWhenTakenOff = intent.getBooleanExtra(EXTRA_PAUSE_TAKEN_OFF, false)
@@ -1144,13 +1147,18 @@ class MainActivity : AppCompatActivity() {
             else "Peripheral/multipoint family not supported on this device"
             return
         }
-        for (i in multiMacs.indices) {
+
+        // Connected devices first, stable within the two groups. The original
+        // indices are kept so row callbacks still address the source arrays.
+        val order = multiMacs.indices
+            .sortedByDescending { multiConnected.getOrElse(it) { false } }
+
+        for ((visualIndex, i) in order.withIndex()) {
             val name = multiNames.getOrElse(i) { multiMacs[i] }
             val isActive = multiActive.getOrElse(i) { false }
+            val isConnected = multiConnected.getOrElse(i) { false }
 
-            // Was a single row crammed with name + MAC + a full Button, which
-            // rendered as one long strip with a grey block hanging off the end.
-            // Now: device identity on the first line, the quiet detail on the
+            // Device identity on the first line, the quiet detail on the
             // second, and the destructive action as a borderless text action
             // rather than a filled button competing with the row itself.
             val row = android.widget.LinearLayout(this).apply {
@@ -1160,13 +1168,31 @@ class MainActivity : AppCompatActivity() {
                     this@MainActivity,
                     if (isActive) R.drawable.bg_device_row_active else R.drawable.bg_device_row
                 )
-                isClickable = !isActive
+                // Switching to a device the headphones are not connected to is
+                // refused by the headset; do not offer it as a tap target.
+                isClickable = !isActive && isConnected
             }
 
             val top = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
             }
+            // A state dot ahead of the name carries connected/active at a
+            // glance, independent of the label on the right.
+            top.addView(android.widget.TextView(this).apply {
+                text = "●"
+                textSize = 11f
+                setTextColor(
+                    when {
+                        isActive -> Color.rgb(140, 225, 190)
+                        isConnected -> Color.rgb(150, 190, 230)
+                        else -> Color.rgb(95, 95, 95)
+                    },
+                )
+            }, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(8) })
             top.addView(android.widget.TextView(this).apply {
                 text = name
                 textSize = 15f
@@ -1179,7 +1205,8 @@ class MainActivity : AppCompatActivity() {
             val statusText = when {
                 isActive && playbackFixed -> "Active · locked"
                 isActive -> "Active"
-                else -> "Tap to switch"
+                isConnected -> "Connected · tap to switch"
+                else -> "Not connected"
             }
             top.addView(android.widget.TextView(this).apply {
                 text = statusText
@@ -1188,6 +1215,7 @@ class MainActivity : AppCompatActivity() {
                     when {
                         isActive && playbackFixed -> Color.rgb(255, 205, 120)
                         isActive -> Color.rgb(140, 225, 190)
+                        isConnected -> Color.rgb(150, 190, 230)
                         else -> Color.rgb(110, 110, 110)
                     },
                 )
@@ -1247,7 +1275,7 @@ class MainActivity : AppCompatActivity() {
             }
             row.addView(bottom)
 
-            if (!isActive) {
+            if (!isActive && isConnected) {
                 row.setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
                     sendToService(ACTION_SOURCE_SWITCH) { putExtra(EXTRA_TARGET_MAC, multiMacs[i]) }
@@ -1259,7 +1287,7 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 // Rows were stacked with no gap, so adjacent devices shared a
                 // border and read as one block.
-                if (i > 0) topMargin = dp(8)
+                if (visualIndex > 0) topMargin = dp(8)
             })
         }
         // No status line under the list. It spent its life as a switch message --
