@@ -102,6 +102,12 @@ class BluetoothAncService : Service() {
     private var deviceAddress: String? = null
 
     /**
+     * The headphones' Bluetooth name as reported at connect time, used for the
+     * notification title. Falls back to the model when unknown.
+     */
+    private var deviceName: String = ""
+
+    /**
      * Consecutive connect failures, deliberately a field rather than a local.
      *
      * It used to be local to connectBluetooth, so every triggerReconnect reset it
@@ -644,7 +650,8 @@ class BluetoothAncService : Service() {
                     // would open and then speak the wrong protocol — the broken
                     // connections and wrong readouts that led to XM5 support being
                     // scrapped in v1.83. Refuse it politely instead of half-working.
-                    if ((device.name ?: "").contains("XM5", ignoreCase = true)) {
+                    deviceName = device.name ?: ""
+                    if (deviceName.contains("XM5", ignoreCase = true)) {
                         Log.w(tag, "WH-1000XM5 detected — not supported")
                         status = Status.ERROR
                         broadcastStatus(status, "WH-1000XM5 is not supported — this app is XM6 only")
@@ -2072,9 +2079,10 @@ class BluetoothAncService : Service() {
         )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            // The shade already shows "Sony ANC Auto" above this, so the model name
-            // is more useful here than repeating the app name.
-            .setContentTitle(profile.modelName)
+            // The shade already shows "Sony ANC Auto" above this. The user's own
+            // Bluetooth name for the headphones beats the model — the app speaks
+            // XM6 and nothing else, so the model alone says little.
+            .setContentTitle(deviceName.takeIf { it.isNotBlank() } ?: profile.modelName)
             .setContentText(primary)
             .apply { if (meta.isNotEmpty()) setSubText(meta) }
             .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))

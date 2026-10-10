@@ -16,6 +16,8 @@
                                 <TextView android:id="@+id/textFeatureStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#FF7FD4A8" android:layout_marginStart="8dp" android:visibility="gone" />
                             </LinearLayout>
 
+                            <TextView android:id="@+id/textModelSub" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="11sp" android:textColor="#FF888888" android:text="WH-1000XM6" android:paddingTop="2dp" />
+
                             <TextView android:id="@+id/textStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FFAAAAAA" android:text="—" android:paddingTop="2dp" />
 
                             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:gravity="center_vertical">

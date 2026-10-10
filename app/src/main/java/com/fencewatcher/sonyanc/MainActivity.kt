@@ -1513,6 +1513,7 @@ class MainActivity : AppCompatActivity() {
         binding.switchVoice.isChecked = prefs.getBoolean("voice_passthrough_$addr", false)
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
         updateProfileLabel()
+        updateHeroTitle()
     }
 
 
@@ -1528,6 +1529,21 @@ class MainActivity : AppCompatActivity() {
      */
     private fun applyAmbientNow() {
         if (BluetoothAncService.isRunning) sendToService(ACTION_APPLY_AMBIENT) {}
+    }
+
+    /**
+     * The hero title is the headphones' Bluetooth name — the user's own name
+     * for them — with the model demoted to a small subtitle underneath: the
+     * app speaks XM6 and nothing else, so the model alone says little.
+     */
+    private fun updateHeroTitle() {
+        val device = pairedDevices.getOrNull(binding.spinnerDevice.selectedItemPosition)
+            ?: pairedDevices.firstOrNull()
+        val name = device?.name?.takeIf { it.isNotBlank() } ?: "WH-1000XM6"
+        binding.textModel.text = name
+        // Skip the subtitle when the Bluetooth name already is the model.
+        binding.textModelSub.text =
+            if (name.equals("WH-1000XM6", ignoreCase = true)) "" else "WH-1000XM6"
     }
 
     /** The app speaks the XM6 protocol and nothing else. */
@@ -1580,12 +1596,13 @@ class MainActivity : AppCompatActivity() {
                 pairedDevices.add(DeviceInfo(name, d.address))
         }
         if (pairedDevices.isEmpty()) {
-            binding.textModel.text = "No headphones"; updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
+            binding.textModel.text = "No headphones"; binding.textModelSub.text = ""
+            updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
             updateModelArt("")
         } else {
-            val first = pairedDevices.first().name
-            binding.textModel.text = first; updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
-            updateModelArt(first)
+            updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
+            updateHeroTitle()
+            updateModelArt(pairedDevices.first().name)
         }
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
