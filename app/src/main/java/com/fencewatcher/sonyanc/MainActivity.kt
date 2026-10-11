@@ -773,8 +773,8 @@ class MainActivity : AppCompatActivity() {
 
     private var automationRules: List<Automation.Rule> = emptyList()
 
-    /** Guards against queueing several post-drag re-renders (every row receives DRAG_ENDED). */
-    private var automationRenderPosted = false
+    /** Row currently being reordered by the touch-driven drag, or null. */
+    private var dragMovedRow: android.view.View? = null
 
     /** Mirrors the service's autoPaused so Home and Routines agree with the notification. */
     private var autoPaused = false
@@ -839,11 +839,6 @@ class MainActivity : AppCompatActivity() {
             })
             return
         }
-        // Rule id -> row, so a drag can move the live view rather than rebuilding
-        // the list underneath itself. Re-rendering mid-drag destroys the view
-        // being dragged and the gesture stalls.
-        val rowsById = mutableMapOf<String, android.view.View>()
-
         automationRules.forEachIndexed { index, rule ->
             val row = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
@@ -852,7 +847,7 @@ class MainActivity : AppCompatActivity() {
                 isClickable = true
                 setBackgroundColor(if (rule.enabled) 0x22334466 else 0x00000000)
             }
-            rowsById[rule.id] = row
+            row.tag = rule.id
 
             // Order is the rule's behaviour, not decoration — the first match wins —
             // so it needs a handle that can be grabbed, and a number that shows
@@ -862,10 +857,51 @@ class MainActivity : AppCompatActivity() {
                 gravity = android.view.Gravity.CENTER
                 setPadding(dp(10), dp(6), dp(6), dp(6))
                 contentDescription = "Reorder rule ${index + 1}"
-                setOnLongClickListener { v ->
-                    val clip = android.content.ClipData.newPlainText("rule", rule.id)
-                    v.startDragAndDrop(clip, android.view.View.DragShadowBuilder(v), rule.id, 0)
+
+                // Reordering is driven by the raw touch stream, not the
+                // framework's drag-and-drop system. startDragAndDrop delivers
+                // events wherever the framework decides the drag target is,
+                // which proved unreliable inside this list twice over (v1.99:
+                // mutating the hierarchy killed the events; v2.00: the
+                // container-level listener still never moved rows on real
+                // hardware). A long-press here claims the stream with
+                // requestDisallowInterceptTouchEvent, and every subsequent
+                // MOVE is handled locally — no drag targeting involved.
+                setOnLongClickListener {
+                    dragMovedRow = row
+                    requestDisallowInterceptTouchEvent(true)
+                    row.translationZ = 12f
+                    row.alpha = 0.85f
+                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     true
+                }
+                setOnTouchListener { _, ev ->
+                    val moved = dragMovedRow ?: return@setOnTouchListener false
+                    when (ev.action) {
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            reorderAutomationByPointer(ev.rawY, moved)
+                            true
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            dragMovedRow = null
+                            moved.translationZ = 0f
+                            moved.alpha = 1f
+                            // Save without rendering inline: renderAutomation()
+                            // tears down the rows, and this very touch event is
+                            // still being dispatched to one of them.
+                            Automation.save(this@MainActivity, automationRules)
+                            sendToService(ACTION_RELOAD_AUTOMATION) {}
+                            box.post { renderAutomation() }
+                            true
+                        }
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            dragMovedRow = null
+                            moved.translationZ = 0f
+                            moved.alpha = 1f
+                            true
+                        }
+                        else -> true
+                    }
                 }
             }
             handle.addView(android.widget.TextView(this).apply {
@@ -956,82 +992,45 @@ class MainActivity : AppCompatActivity() {
             })
         }
 
-        // One drag listener on the container, coordinate-driven. Per-row
-        // ENTERED handlers depend on the framework switching the drag target
-        // between rows, which proved fragile — and once the hierarchy was
-        // mutated mid-drag, they stopped firing altogether (the shadow moved,
-        // nothing reordered). Here the container is the sole drag target:
-        // every DRAG_LOCATION carries the pointer position relative to the
-        // box, so the reorder is computed from geometry on every move.
-        box.setOnDragListener { _, ev ->
-            when (ev.action) {
-                android.view.DragEvent.ACTION_DRAG_STARTED ->
-                    ev.clipDescription?.hasMimeType("text/plain") == true
-                android.view.DragEvent.ACTION_DRAG_LOCATION -> {
-                    val id = ev.clipData?.getItemAt(0)?.text?.toString()
-                        ?: return@setOnDragListener true
-                    val moved = rowsById[id] ?: return@setOnDragListener true
-                    val current = box.indexOfChild(moved)
+    }
 
-                    // Which row sits under the pointer, and which half of it?
-                    // Above a row's midline inserts before it, below inserts
-                    // after; the hint text is not a rule row.
-                    var targetChild = -1
-                    var after = false
-                    for (i in 0 until box.childCount) {
-                        val child = box.getChildAt(i)
-                        if (child === moved) continue
-                        if (rowsById.entries.none { it.value === child }) continue
-                        val mid = child.top + child.height / 2f
-                        if (ev.y < mid) {
-                            targetChild = i; after = false; break
-                        }
-                        if (ev.y <= child.bottom) {
-                            targetChild = i; after = true; break
-                        }
-                    }
+    /**
+     * Touch-driven reorder: [rawPointerY] is the pointer's screen-space Y (the
+     * motion event's rawY). The insertion point is derived from geometry — how
+     * many other rule rows have their midline above the pointer — reading the
+     * live view tree on every move. Nothing can go stale and no framework
+     * drag-target decision is involved: the handle that started the drag keeps
+     * receiving the events because it claimed the stream.
+     */
+    private fun reorderAutomationByPointer(rawPointerY: Float, moved: android.view.View) {
+        val box = binding.automationList
+        if (box.indexOfChild(moved) < 0) return
+        val loc = IntArray(2)
+        box.getLocationOnScreen(loc)
+        val pointerY = rawPointerY - loc[1]
 
-                    // Insertion index after the moved row is removed (children
-                    // below its position shift up by one).
-                    val insertIndex = if (targetChild < 0) {
-                        box.childCount - 2
-                    } else {
-                        val t2 = if (current < targetChild) targetChild - 1 else targetChild
-                        if (after) t2 + 1 else t2
-                    }
+        val ruleRows = (0 until box.childCount).map { box.getChildAt(it) }
+            .filter { it.tag is String }
+        val others = ruleRows.filter { it !== moved }
+        val insertPos = others.count { pointerY > it.top + it.height / 2f }
+        val currentOrder = ruleRows.map { it.tag as String }
+        val newOrder = others.map { it.tag as String }.toMutableList()
+            .also { it.add(insertPos, moved.tag as String) }
+        if (newOrder == currentOrder) return
 
-                    if (insertIndex in 0..box.childCount && insertIndex != current) {
-                        box.removeView(moved)
-                        box.addView(moved, insertIndex.coerceIn(0, box.childCount))
-                        // The box shows the new order — mirror it in the list.
-                        automationRules = (0 until box.childCount).mapNotNull { child ->
-                            val childId = rowsById.entries
-                                .firstOrNull { it.value === box.getChildAt(child) }?.key
-                            childId?.let { cid -> automationRules.firstOrNull { it.id == cid } }
-                        }
-                    }
-                    true
-                }
-                android.view.DragEvent.ACTION_DROP -> {
-                    // Save without re-rendering: saveAutomation() rebuilds the
-                    // whole list, and destroying rows while the framework is
-                    // still dispatching drag events is what crashed earlier.
-                    Automation.save(this, automationRules)
-                    sendToService(ACTION_RELOAD_AUTOMATION) {}
-                    true
-                }
-                android.view.DragEvent.ACTION_DRAG_ENDED -> {
-                    if (!automationRenderPosted) {
-                        automationRenderPosted = true
-                        box.post {
-                            automationRenderPosted = false
-                            renderAutomation()
-                        }
-                    }
-                    true
-                }
-                else -> true
-            }
+        box.removeView(moved)
+        val anchorIndex = if (insertPos < others.size) {
+            box.indexOfChild(others[insertPos])
+        } else {
+            // Append after the last rule row; the tag-less hint text closes the box.
+            if (box.getChildAt(box.childCount - 1).tag == null) box.childCount - 1 else box.childCount
+        }
+        box.addView(moved, anchorIndex)
+
+        // Mirror the live order back onto the rules list.
+        automationRules = (0 until box.childCount).mapNotNull { c ->
+            val id = box.getChildAt(c).tag as? String
+            id?.let { cid -> automationRules.firstOrNull { it.id == cid } }
         }
     }
 
