@@ -773,6 +773,9 @@ class MainActivity : AppCompatActivity() {
 
     private var automationRules: List<Automation.Rule> = emptyList()
 
+    /** Guards against queueing several post-drag re-renders (every row receives DRAG_ENDED). */
+    private var automationRenderPosted = false
+
     /** Mirrors the service's autoPaused so Home and Routines agree with the notification. */
     private var autoPaused = false
 
@@ -921,38 +924,70 @@ class MainActivity : AppCompatActivity() {
             val toggle = android.widget.Switch(this).apply {
                 isChecked = rule.enabled
                 setOnCheckedChangeListener { _, checked ->
-                    automationRules = automationRules.toMutableList().also {
-                        it[index] = it[index].copy(enabled = checked)
+                    // Locate the rule by id — positions captured at render time
+                    // go stale once a drag has reordered the list.
+                    automationRules = automationRules.map {
+                        if (it.id == rule.id) it.copy(enabled = checked) else it
                     }
                     saveAutomation()
                 }
             }
             row.addView(toggle)
-            row.setOnClickListener { showRuleEditor(index) }
+            row.setOnClickListener {
+                val pos = automationRules.indexOfFirst { it.id == rule.id }
+                if (pos >= 0) showRuleEditor(pos)
+            }
 
             // Reorder as the row is entered, so the list follows the finger, and
             // only the final position is written to storage.
-            row.setOnDragListener { _, ev ->
+            row.setOnDragListener { v, ev ->
                 when (ev.action) {
                     android.view.DragEvent.ACTION_DRAG_STARTED ->
                         ev.clipDescription?.hasMimeType("text/plain") == true
                     android.view.DragEvent.ACTION_DRAG_ENTERED -> {
                         val id = ev.clipData?.getItemAt(0)?.text?.toString()
-                        val from = automationRules.indexOfFirst { it.id == id }
-                        if (id != null && from >= 0 && from != index) {
-                            automationRules = automationRules.toMutableList().also {
-                                it.add(index, it.removeAt(from))
-                            }
-                            rowsById[id]?.let { moved ->
-                                box.removeView(moved)
-                                box.addView(moved, index)
-                            }
+                            ?: return@setOnDragListener true
+                        val moved = rowsById[id] ?: return@setOnDragListener true
+                        // Recompute everything from the live hierarchy: the
+                        // indices captured at render time go stale the moment
+                        // rows move, and reordering the list against the view
+                        // order desynced the two until they crashed.
+                        val target = box.indexOfChild(v)
+                        val current = box.indexOfChild(moved)
+                        if (target < 0 || current < 0 || target == current)
+                            return@setOnDragListener true
+                        box.removeView(moved)
+                        box.addView(moved, target.coerceAtMost(box.childCount))
+                        // The box now shows the new order — mirror it in the
+                        // list. The hint text at the end is not a rule row.
+                        automationRules = (0 until box.childCount).mapNotNull { child ->
+                            val childId = rowsById.entries
+                                .firstOrNull { it.value === box.getChildAt(child) }?.key
+                            childId?.let { cid -> automationRules.firstOrNull { it.id == cid } }
                         }
                         true
                     }
-                    android.view.DragEvent.ACTION_DROP, android.view.DragEvent.ACTION_DRAG_ENDED -> {
-                        saveAutomation()
-                        renderAutomation()
+                    android.view.DragEvent.ACTION_DROP -> {
+                        // Save without re-rendering: saveAutomation() rebuilds
+                        // the whole list, and destroying the rows — including
+                        // the view the drop is being delivered to — while the
+                        // framework is still dispatching drag events is what
+                        // took the app down.
+                        Automation.save(this, automationRules)
+                        sendToService(ACTION_RELOAD_AUTOMATION) {}
+                        true
+                    }
+                    android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                        // Every row receives ENDED. The order is already
+                        // mirrored; re-render once, posted after the dispatch
+                        // has finished rather than mid-dispatch.
+                        if (!automationRenderPosted) {
+                            automationRenderPosted = true
+                            box.post {
+                                automationRenderPosted = false
+                                renderAutomation()
+                            }
+                        }
                         true
                     }
                     else -> true
