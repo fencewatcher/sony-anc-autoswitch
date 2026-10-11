@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.95](https://img.shields.io/badge/version-1.95-blue)
+![v1.96](https://img.shields.io/badge/version-1.96-blue)
 
 ---
 
@@ -26,7 +26,7 @@
 - **👕 Wear detection** — Asks the headphones whether they're on your head, rather than inferring it. Green when worn, yellow when off, and drives the on/off-head automation triggers.
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
-- **🔋 Battery + mode display** — Battery level and current ANC mode in the headphone card
+- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down
 
 ### Controls
 
@@ -47,7 +47,7 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 
 | Tab | Content |
 |---|---|
-| **Home** | Headphone card (model, battery, mode, wear indicator, codec), Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
+| **Home** | Headphone card (Bluetooth name, mode, wear indicator, codec), battery card with estimate, Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
 | **Audio** | EQ presets + draggable curve, ambient, voice passthrough, speak-to-chat, DSEE, BGM, upmix, voice guidance |
 | **Devices** | Headphone picker, connection mode, multipoint list, playback lock, pairing mode |
 | **Routines** | Quick Access shortcuts, then your automation rules |

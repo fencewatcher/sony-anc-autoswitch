@@ -34,6 +34,18 @@
             android:foregroundServiceType="connectedDevice"
             android:exported="false" />
 
+        <!-- Battery samples pushed by the Bluetooth stack over the standard
+             profiles (HFP/AVRCP). Protected system broadcast: only the system
+             can send it, but the app can listen — this keeps the battery
+             tracker alive even when the MDR link or the service is down. -->
+        <receiver
+            android:name=".BatteryLevelReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.BATTERY_LEVEL_CHANGED" />
+            </intent-filter>
+        </receiver>
+
 
         <activity
             android:name=".MainActivity"

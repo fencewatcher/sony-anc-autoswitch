@@ -20,9 +20,7 @@
 
                             <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content" android:orientation="horizontal" android:paddingTop="8dp" android:gravity="center_vertical">
 
-                                <TextView android:id="@+id/textBattery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FFCCCCCC" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:text="—" />
-
-                                <TextView android:id="@+id/textMode" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FF7FD4A8" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:layout_marginStart="8dp" android:text="—" />
+                                <TextView android:id="@+id/textMode" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FF7FD4A8" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:text="—" />
 
                                 <TextView android:id="@+id/textFeatureStatus" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="13sp" android:textColor="#FF7FD4A8" android:background="@drawable/bg_chip" android:paddingHorizontal="10dp" android:paddingVertical="4dp" android:layout_marginStart="8dp" android:visibility="gone" />
                             </LinearLayout>
@@ -31,6 +29,16 @@
                 <ImageView android:id="@+id/imageWear" android:layout_width="24dp" android:layout_height="24dp" android:src="@drawable/ic_headphones" android:layout_gravity="top|end" android:layout_margin="10dp" android:scaleType="fitCenter" android:contentDescription="Wearing status" android:visibility="gone" />
 </FrameLayout>
                 </com.google.android.material.card.MaterialCardView>
+
+                <com.google.android.material.card.MaterialCardView android:layout_width="match_parent" android:layout_height="wrap_content" app:cardBackgroundColor="@color/surface" app:cardCornerRadius="16dp" app:cardElevation="0dp" android:layout_marginBottom="12dp"><LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" android:padding="16dp"><TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="BATTERY" android:textSize="11sp" android:textStyle="bold" android:textColor="#FF888888" android:paddingBottom="8dp" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+
+                        <TextView android:id="@+id/textBattery" android:layout_width="wrap_content" android:layout_height="wrap_content" android:textSize="40sp" android:textStyle="bold" android:textColor="@color/on_surface" android:text="—" />
+
+                        <TextView android:id="@+id/textBatteryEstimate" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:textSize="14sp" android:textColor="#FFAAAAAA" android:layout_marginStart="16dp" android:gravity="end" android:text="--" />
+                    </LinearLayout>
+                </LinearLayout></com.google.android.material.card.MaterialCardView>
 
                 <Button android:id="@+id/btnToggle" android:layout_width="match_parent" android:layout_height="44dp" android:text="Start" android:textColor="@android:color/white" android:textSize="14sp" android:enabled="false" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="@color/stop_button_tint" android:insetTop="0dp" android:insetBottom="0dp" android:layout_marginTop="0dp" android:layout_marginBottom="12dp" />
                 <Button android:id="@+id/btnRetryNow" android:layout_width="match_parent" android:layout_height="40dp" android:text="Retry now" android:textColor="@android:color/white" android:textSize="13sp" android:visibility="gone" app:cornerRadius="16dp" android:paddingHorizontal="8dp" app:backgroundTint="#3A5C8C" android:insetTop="0dp" android:insetBottom="0dp" android:layout_marginBottom="12dp" />

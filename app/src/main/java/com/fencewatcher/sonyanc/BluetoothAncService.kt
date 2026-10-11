@@ -1039,6 +1039,7 @@ class BluetoothAncService : Service() {
                     if (level in 1..100) {
                         batteryPercent = level
                         Log.d(tag, "Battery: $batteryPercent%")
+                        deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR) }
                         refreshNotification()
                         // Fire only on the crossing, not on every 60s poll — otherwise a
                         // rule bound to "battery low" would re-run every minute.
@@ -2339,6 +2340,11 @@ class BluetoothAncService : Service() {
     var voiceGuidanceVolume: Int = -1
         private set
 
+    /** "≈ 4h 12m" / "≈ 5h" / "--" — computed from the persisted battery history. */
+    private fun batteryEstimateText(): String =
+        deviceAddress?.let { addr -> BatteryHistory.estimate(addr)?.let { BatteryHistory.format(it) } }
+            ?: "--"
+
     private fun broadcastStatus(s: Status, message: String? = null) {
         lastStatusMessage = message
         val intent = Intent(STATUS_BROADCAST).apply {
@@ -2353,6 +2359,7 @@ class BluetoothAncService : Service() {
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
             if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
+            putExtra(EXTRA_BATTERY_ESTIMATE, batteryEstimateText())
             `package` = packageName
         }
         try {
@@ -2371,6 +2378,7 @@ class BluetoothAncService : Service() {
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
             if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
+            putExtra(EXTRA_BATTERY_ESTIMATE, batteryEstimateText())
             // Only once the headset has actually reported EQ state — before
             // that, the zero default read as a confident "Off (Flat)" that
             // nobody on the device had selected.
@@ -2537,6 +2545,9 @@ class BluetoothAncService : Service() {
         const val EXTRA_DEVICE_ACTIVE = "device_active"
         const val EXTRA_DEVICE_CONNECTED = "device_connected"
         const val EXTRA_DEVICE_NAME = "device_name"
+
+        /** Formatted time-to-empty estimate, or "--" when none can be provided. */
+        const val EXTRA_BATTERY_ESTIMATE = "battery_estimate"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast

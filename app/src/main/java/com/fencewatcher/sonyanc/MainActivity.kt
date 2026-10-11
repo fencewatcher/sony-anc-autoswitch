@@ -25,6 +25,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY_ESTIMATE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_BANDS
@@ -297,6 +298,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
+                // Computed service-side from the battery history. "--" means no
+                // credible estimate (too little data, charging, or stale);
+                // always set so a cleared estimate cannot linger.
+                binding.textBatteryEstimate.text = intent.getStringExtra(EXTRA_BATTERY_ESTIMATE) ?: "--"
                 updateCardStats()
                 if (!serviceRunning) updateHeroTitle()
                 // Link-derived readouts die with the link: codec/LDAC, DSEE and
