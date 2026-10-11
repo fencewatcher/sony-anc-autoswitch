@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.97](https://img.shields.io/badge/version-1.97-blue)
+![v1.98](https://img.shields.io/badge/version-1.98-blue)
 
 ---
 
@@ -26,7 +26,7 @@
 - **👕 Wear detection** — Asks the headphones whether they're on your head, rather than inferring it. Green when worn, yellow when off, and drives the on/off-head automation triggers.
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
-- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down
+- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down. Every sample is tagged with its context (NC mode, worn, media playing) and the estimate prefers the drain rate of the current context, falling back to the blended rate
 
 ### Controls
 

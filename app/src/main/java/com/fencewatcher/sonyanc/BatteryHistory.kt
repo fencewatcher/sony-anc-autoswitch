@@ -49,7 +49,7 @@ object BatteryHistory {
      *  away; a slope across it underestimates the drain. */
     private const val MAX_GAP_MS = 2L * 60 * 60 * 1000
 
-    data class Sample(val t: Long, val p: Int, val source: Int)
+    data class Sample(val t: Long, val p: Int, val source: Int, val ctx: Int = 0)
 
     data class Estimate(val minutes: Int, val reliable: Boolean)
 
@@ -57,7 +57,7 @@ object BatteryHistory {
     private val byDevice = LinkedHashMap<String, MutableList<Sample>>()
     private var loaded = false
 
-    fun record(context: Context, address: String, percent: Int, source: Int) {
+    fun record(context: Context, address: String, percent: Int, source: Int, ctx: Int = 0) {
         if (percent !in 1..100 || address.isBlank()) return
         synchronized(lock) {
             loadLocked(context)
@@ -67,15 +67,25 @@ object BatteryHistory {
                 val last = list.last()
                 if (now - last.t < DEDUPE_WINDOW_MS && last.p == percent) return
             }
-            list.add(Sample(now, percent, source))
+            list.add(Sample(now, percent, source, ctx))
             while (list.isNotEmpty() && now - list.first().t > MAX_AGE_MS) list.removeAt(0)
             while (list.size > MAX_SAMPLES_PER_DEVICE) list.removeAt(0)
             saveLocked(context)
         }
     }
 
-    /** Time-to-empty in minutes for [address], or null when it cannot be provided. */
-    fun estimate(address: String): Estimate? {
+    /**
+     * Time-to-empty in minutes for [address], or null when it cannot be
+     * provided.
+     *
+     * [currentContext] is the compact context marker the headphones are in
+     * right now (see the service). When set, the drain rate is computed from
+     * samples taken under the same context — playing-with-NC drains roughly
+     * twice as fast as idle-with-ambient, so this is the biggest accuracy
+     * lever — falling back to the blended segment rate when the matching set
+     * is too thin. The *level* is always the freshest reading overall.
+     */
+    fun estimate(address: String, currentContext: Int = -1): Estimate? {
         synchronized(lock) {
             val list = byDevice[address] ?: return null
             if (list.size < 3) return null
@@ -91,14 +101,7 @@ object BatteryHistory {
             if (list.size - start < 3) return null
             val segment = list.subList(start, list.size)
 
-            val spanMs = segment.last().t - segment.first().t
-            if (spanMs < MIN_SEGMENT_SPAN_MS) return null
-            val drop = segment.first().p - segment.last().p
-            if (drop < 1) return null   // flat (charging, or idle at a wall)
-            val ratePerHour = drop.toDouble() * 3_600_000.0 / spanMs
-            if (ratePerHour <= 0.0) return null
-
-            val minutes = (segment.last().p / ratePerHour * 60.0).toInt().coerceIn(0, 24 * 60)
+            val lastLevel = segment.last().p
             val ageMs = System.currentTimeMillis() - segment.last().t
             if (ageMs > STALE_WINDOW_MS) return null
 
@@ -106,13 +109,63 @@ object BatteryHistory {
             for (i in 1 until segment.size) {
                 maxGapMs = maxOf(maxGapMs, segment[i].t - segment[i - 1].t)
             }
-            val reliable = spanMs >= RELIABLE_SPAN_MS &&
-                drop >= RELIABLE_MIN_DROP &&
+
+            // Preferred rate: context-matched samples. Fallback: the blended
+            // segment. Both must clear the minimum span and drop thresholds.
+            val matched = if (currentContext >= 0)
+                segment.filter { it.ctx == currentContext } else emptyList()
+            val matchedViable = matched.size >= 3 &&
+                (matched.last().t - matched.first().t) >= MIN_SEGMENT_SPAN_MS &&
+                (matched.first().p - matched.last().p) >= 1
+            val used = if (matchedViable) matched else segment
+
+            val usedSpanMs = used.last().t - used.first().t
+            if (usedSpanMs < MIN_SEGMENT_SPAN_MS) return null
+            val usedDrop = used.first().p - used.last().p
+            if (usedDrop < 1) return null   // flat (charging, or idle at a wall)
+            val ratePerHour = leastSquaresRatePerHour(used)
+            if (ratePerHour <= 0.0) return null
+
+            val minutes = (lastLevel / ratePerHour * 60.0).toInt().coerceIn(0, 24 * 60)
+
+            // Reliability is judged on the set that produced the rate (span
+            // and drop) but on the raw segment's continuity — gaps between
+            // *matching* samples are expected when the context alternates,
+            // while a silent stretch in the raw stream means the headphones
+            // were away and the slope across it lies.
+            val reliable = usedSpanMs >= RELIABLE_SPAN_MS &&
+                usedDrop >= RELIABLE_MIN_DROP &&
                 ageMs <= FRESH_WINDOW_MS &&
                 maxGapMs <= MAX_GAP_MS
 
             return Estimate(minutes, reliable)
         }
+    }
+
+    /**
+     * Drain rate in %/hour from a least-squares fit — more robust than
+     * endpoints when samples come from two sources with different
+     * granularity. Positive while discharging, negative while charging.
+     */
+    private fun leastSquaresRatePerHour(samples: List<Sample>): Double {
+        val n = samples.size
+        if (n < 2) return 0.0
+        val ts = DoubleArray(n)
+        val ps = DoubleArray(n)
+        for ((i, s) in samples.withIndex()) {
+            ts[i] = (s.t - samples.first().t) / 1000.0
+            ps[i] = s.p.toDouble()
+        }
+        val meanT = ts.average()
+        val meanP = ps.average()
+        var num = 0.0
+        var den = 0.0
+        for (i in 0 until n) {
+            num += (ts[i] - meanT) * (ps[i] - meanP)
+            den += (ts[i] - meanT) * (ts[i] - meanT)
+        }
+        if (den <= 0.0) return 0.0
+        return -(num / den) * 3600.0
     }
 
     /** "≈ 4h 12m" when reliable; "≈ 5h" (no minutes) when the data is thin. */
@@ -140,7 +193,7 @@ object BatteryHistory {
                 val list = mutableListOf<Sample>()
                 for (i in 0 until arr.length()) {
                     val s = arr.optJSONObject(i) ?: continue
-                    list.add(Sample(s.optLong("t"), s.optInt("p"), s.optInt("s", SOURCE_MDR)))
+                    list.add(Sample(s.optLong("t"), s.optInt("p"), s.optInt("s", SOURCE_MDR), s.optInt("c", 0)))
                 }
                 byDevice[key] = list
             }
@@ -155,7 +208,7 @@ object BatteryHistory {
             for ((key, list) in byDevice) {
                 val arr = JSONArray()
                 for (s in list) {
-                    arr.put(JSONObject().put("t", s.t).put("p", s.p).put("s", s.source))
+                    arr.put(JSONObject().put("t", s.t).put("p", s.p).put("s", s.source).put("c", s.ctx))
                 }
                 obj.put(key, arr)
             }

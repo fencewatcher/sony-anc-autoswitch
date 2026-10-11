@@ -1039,7 +1039,7 @@ class BluetoothAncService : Service() {
                     if (level in 1..100) {
                         batteryPercent = level
                         Log.d(tag, "Battery: $batteryPercent%")
-                        deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR) }
+                        deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR, currentContext()) }
                         refreshNotification()
                         // Fire only on the crossing, not on every 60s poll — otherwise a
                         // rule bound to "battery low" would re-run every minute.
@@ -2340,10 +2340,30 @@ class BluetoothAncService : Service() {
     var voiceGuidanceVolume: Int = -1
         private set
 
-    /** "≈ 4h 12m" / "≈ 5h" / "--" — computed from the persisted battery history. */
+    /** "≈ 4h 12m" / "≈ 5h" / "--" — computed from the persisted battery history,
+     *  preferring samples taken under the same context (mode/worn/playing). */
     private fun batteryEstimateText(): String =
-        deviceAddress?.let { addr -> BatteryHistory.estimate(addr)?.let { BatteryHistory.format(it) } }
-            ?: "--"
+        deviceAddress?.let { addr ->
+            BatteryHistory.estimate(addr, currentContext())?.let { BatteryHistory.format(it) }
+        } ?: "--"
+
+    /**
+     * Compact context marker recorded with each battery sample and matched by
+     * the estimator: bit0 = media playing, bit1 = worn, bits 2-3 = NC mode
+     * (0 unknown, 1 NC, 2 ambient, 3 off). Drain differs roughly 2x between
+     * the extremes, so matching the context is the biggest accuracy lever.
+     */
+    private fun currentContext(): Int {
+        val modeBits = when {
+            currentModeName.startsWith("NC", ignoreCase = true) -> 1
+            currentModeName.startsWith("Ambient", ignoreCase = true) -> 2
+            currentModeName.startsWith("Off", ignoreCase = true) -> 3
+            else -> 0
+        }
+        return (if (isMediaPlaying) 1 else 0) or
+            (if (headphonesWorn == true) 2 else 0) or
+            (modeBits shl 2)
+    }
 
     private fun broadcastStatus(s: Status, message: String? = null) {
         lastStatusMessage = message
