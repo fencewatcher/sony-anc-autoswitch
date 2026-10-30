@@ -2,6 +2,11 @@
 
 > Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and a live readout of what the headphones are actually doing.
 
+This is also the base for a **local replacement for Sony | Sound Connect**: same
+headphone control, no Sony account, no telemetry, and no `INTERNET` permission.
+What that covers, and what it deliberately does not, is in
+[`sony-app-re/replacement-plan.md`](../sony-app-re/replacement-plan.md).
+
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
 ![v1.65](https://img.shields.io/badge/version-1.65-blue)
@@ -13,7 +18,8 @@
 ### Behaviour
 
 - **🎵 Auto ANC** — Switches NC/Ambient/Off based on media playback (Spotify, YouTube Music, podcast apps, …)
-- **⚙️ Customisable automations** — Rules with triggers (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head) and actions (nothing, set noise control, set ambient level, set volume, set EQ preset). Rules evaluate in order, first match wins.
+- **⚙️ Customisable automations** — Rules with triggers (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head, **activity: still / walking / running / in a vehicle**) and actions (nothing, set noise control, set ambient level, set volume, set EQ preset). Rules evaluate in order, first match wins.
+- **🏃 On-device activity detection** — Classified from the accelerometer and step detector. No Play Services, no location permission, nothing sent anywhere. It only runs while an enabled rule uses it.
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough and auto-ambient settings
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification; both stay in sync
@@ -25,6 +31,8 @@
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
 - **🔋 Battery + mode display** — Battery level and current ANC mode in the headphone card
+- **🏷️ Firmware version** — Read over the protocol and shown as a chip. Read-only: this app has no firmware updater, because Sony signs the images and a third-party flasher is a brick risk.
+- **👆 Touch panel presets** — Reads back which preset each slot is set to. Read-only for now: the reply lists the presets but not the gesture mapping, so a blind write could erase it.
 
 ### Controls
 
@@ -66,15 +74,12 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 
 ### Known gaps
 
-- **LE Audio transport switching is not implemented.** The set payload is four
-  fields: `isLEAudioType`, `isLEAItem`, a `ConnModeSettingType` and a
-  `QualityPriorValue`. An earlier version sent only two bytes, so the frame was
-  truncated *and* expressed the wrong idea — the booleans are LE Audio markers,
-  not an on/off pair. The enum byte codes were recovered from smali (`PriorMode` is
-  0/1/2, `ConnModeSettingType` has a single `SOUND_CONNECTION`), but the wire order
-  of the four fields is not visible statically, and guessing it has already cost
-  five broken releases. The status query is still issued and the raw reply logged,
-  so a capture from the official app can settle the order.
+- **Firmware updates** — not implemented and not planned. Sony-signed images plus a model-specific flasher; use the official app if a real update is needed.
+- **360 Reality Audio / immersive personalisation** — server-side ear-capture analysis and a licensed renderer. Not reproducible offline.
+- **Auto Play / music-service scenes** — server-delivered catalogue and third-party OAuth. Nothing to show without Sony's backend.
+- **Touch-panel writes** — read-only, see above.
+- **Capability gating** — unsupported features are not yet hidden on every model; the `07 00` capability bitmap is still undecoded.
+- **LE Audio transport switching** — the set payload is four fields (`isLEAudioType`, `isLEAItem`, a `ConnModeSettingType` and a `QualityPriorValue`). The enum codes were recovered from smali, but the wire order is not visible statically, and guessing it has already cost five broken releases. The status query is still issued and the raw reply logged, so one capture from the official app settles it.
 
 ## Requirements
 
