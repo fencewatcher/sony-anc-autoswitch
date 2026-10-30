@@ -466,6 +466,19 @@ class MainActivity : AppCompatActivity() {
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
+        // The graph lives one tap behind the battery card: Home keeps the single
+        // number, and the multi-day view is there when you actually ask for it.
+        binding.cardBattery.setOnClickListener {
+            val addr = selectedAddress
+            if (addr == null) {
+                toast("Connect the headphones first")
+            } else {
+                startActivity(
+                    Intent(this, BatteryHistoryActivity::class.java)
+                        .putExtra(BatteryHistoryActivity.EXTRA_ADDRESS, addr),
+                )
+            }
+        }
         // Shown only while the service is up but the link is not — the service
         // already retries on its own; this skips the wait when the headphones
         // have just come back and the next scheduled attempt is still a minute
@@ -1038,6 +1051,15 @@ class MainActivity : AppCompatActivity() {
      * Rule editor: three spinners (when / do / value) in one dialog. Long-pressing a
      * rule in the list deletes it, which keeps this to a single interaction surface.
      */
+    /**
+     * Rule editor: one trigger, an ordered list of actions, optional conditions.
+     *
+     * The old editor edited exactly one action, which made "set NC and EQ and
+     * volume" impossible — three rules on the same trigger would have matched
+     * the first and dropped the rest. Actions are rows now, applied in order.
+     * Conditions are rows too, so a rule can be scoped to a time window, the
+     * wear state, or a battery floor without inventing a separate trigger.
+     */
     private fun showRuleEditor(existingIndex: Int?) {
         val triggers = Automation.Trigger.values()
         val actionTypes = listOf(
@@ -1056,46 +1078,66 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.SET_AUTO_POWER,
             Automation.ActionType.SET_VOICE_GUIDANCE,
         )
+        val levelOptions = listOf(5, 10, 15, 20)
+        val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
+        val percentOptions = listOf(10, 20, 30, 40, 50, 60, 70, 80, 90)
+        // Half-hour steps: fine enough for "22:30", without 1440 rows.
+        val clockOptions = (0 until 48).map { Automation.clock(it * 30) }
+
         val base = existingIndex?.let { automationRules[it] }
-            ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START, Automation.Action())
+            ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START)
+
+        /** Assigned once the row lists exist; declared early so rows can call it. */
+        var refreshPreview: () -> Unit = {}
 
         val linear = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 32, 48, 8)
+            setPadding(dp(12), dp(4), dp(12), dp(4))
         }
-        fun <T> spinner(caption: String, items: List<T>, selected: Int): android.widget.Spinner {
-            linear.addView(android.widget.TextView(this).apply {
-                text = caption
-                textSize = 11f
-                setTextColor(Color.rgb(150, 150, 150))
-            })
-            val sp = android.widget.Spinner(this)
-            sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
-                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        val scroll = android.widget.ScrollView(this).apply { addView(linear) }
+
+        fun caption(text: String) = android.widget.TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            setTextColor(Color.rgb(150, 150, 150))
+            setPadding(0, dp(10), 0, 0)
+        }
+
+        fun newSpinner(items: List<String>, selected: Int = 0): android.widget.Spinner =
+            android.widget.Spinner(this).apply {
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, items).also {
+                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                setSelection(selected.coerceIn(0, maxOf(0, items.size - 1)))
             }
-            sp.setSelection(selected)
-            linear.addView(sp)
-            return sp
+
+        fun removeButton(onClick: () -> Unit) = android.widget.TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(Color.rgb(200, 120, 120))
+            setPadding(dp(12), dp(6), dp(2), dp(6))
+            setOnClickListener { onClick() }
         }
 
-        val whenSp = spinner("When", triggers.map { it.label }, triggers.indexOf(base.trigger))
-        val doSp = spinner("Do", actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
-        val valueSp = android.widget.Spinner(this).also {
-            linear.addView(android.widget.TextView(this).apply {
-                text = "Value"
-                textSize = 11f
-                setTextColor(Color.rgb(150, 150, 150))
-            })
-            linear.addView(it)
+        linear.addView(caption("WHEN"))
+        val whenSp = newSpinner(triggers.map { it.label }, triggers.indexOf(base.trigger))
+        linear.addView(whenSp)
+
+        // ---- actions ----
+
+        /** Rows are kept as the views themselves; their items are read at save time. */
+        data class ActionRow(
+            val root: android.widget.LinearLayout,
+            val type: android.widget.Spinner,
+            val value: android.widget.Spinner,
+        )
+
+        val actionRows = mutableListOf<ActionRow>()
+        val actionsBox = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
         }
 
-        val levelOptions = listOf(5, 10, 15, 20)
-        val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
-
-        // The value list has to follow the chosen action. It used to be a fixed
-        // 4-item list that SET_MODE and SET_EQ_PRESET silently ignored, so those
-        // two actions could only ever produce "noise cancelling" and "Heavy".
-        fun fillValues(type: Automation.ActionType, select: Int) {
+        fun fillValues(type: Automation.ActionType, sp: android.widget.Spinner, select: Int) {
             val items: List<String> = when {
                 type in Automation.ActionType.TOGGLES -> listOf("On", "Off")
                 type == Automation.ActionType.SET_AUTO_POWER ->
@@ -1107,42 +1149,38 @@ class MainActivity : AppCompatActivity() {
                 type == Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
                 else -> emptyList()
             }
-            valueSp.visibility =
-                if (items.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-            valueSp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
+            sp.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+            sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
                 it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
-            valueSp.setSelection(select.coerceIn(0, maxOf(0, items.size - 1)))
+            sp.setSelection(select.coerceIn(0, maxOf(0, items.size - 1)))
         }
 
-        val initialType = actionTypes[doSp.selectedItemPosition]
-        fillValues(initialType, when (initialType) {
+        fun initialValueIndex(type: Automation.ActionType, a: Automation.Action): Int = when (type) {
             Automation.ActionType.SET_MODE ->
-                Automation.Mode.values().indexOf(base.action.mode).coerceAtLeast(0)
+                Automation.Mode.values().indexOf(a.mode).coerceAtLeast(0)
             Automation.ActionType.SET_EQ_PRESET ->
-                eqIds.indexOf(base.action.presetId).let { if (it < 0) 1 else it }
+                eqIds.indexOf(a.presetId).let { if (it < 0) 1 else it }
             Automation.ActionType.SET_AUTO_POWER ->
-                Automation.AutoPower.values().indexOf(base.action.power).coerceAtLeast(0)
+                Automation.AutoPower.values().indexOf(a.power).coerceAtLeast(0)
             Automation.ActionType.SET_AMBIENT_LEVEL,
             Automation.ActionType.SET_VOLUME,
             Automation.ActionType.SET_VOICE_GUIDANCE ->
-                levelOptions.indexOf(base.action.value).let { if (it < 0) 1 else it }
-            in Automation.ActionType.TOGGLES -> if (base.action.value != 0) 0 else 1
+                levelOptions.indexOf(a.value).let { if (it < 0) 1 else it }
+            in Automation.ActionType.TOGGLES -> if (a.value != 0) 0 else 1
             else -> 0
-        })
+        }
 
         /**
-         * The action the three spinners currently describe.
+         * The action the row's spinners describe.
          *
-         * Used by both the live preview and the save handler. Keeping one builder
-         * means the sentence shown while editing is the sentence that gets stored
-         * -- a preview assembled by a second, near-identical `when` would drift
-         * from the rule it claims to describe, which is exactly how the EQ screen
-         * came to read a preset correctly while gating on a different one.
+         * One builder used by both the preview and the save handler: a second,
+         * near-identical `when` is how the EQ screen came to preview one preset
+         * while gating on another.
          */
-        fun currentAction(): Automation.Action {
-            val type = actionTypes[doSp.selectedItemPosition]
-            val pos = valueSp.selectedItemPosition
+        fun actionOf(row: ActionRow): Automation.Action {
+            val type = actionTypes[row.type.selectedItemPosition]
+            val pos = maxOf(0, row.value.selectedItemPosition)
             return when (type) {
                 Automation.ActionType.SET_MODE -> Automation.Action(
                     type = type,
@@ -1164,43 +1202,226 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val preview = android.widget.TextView(this).apply {
-            textSize = 13f
-            setTextColor(Color.rgb(127, 212, 168))
-            setPadding(0, 16, 0, 4)
-        }
-        linear.addView(preview)
-        fun refreshPreview() {
-            val trigger = triggers[whenSp.selectedItemPosition]
-            preview.text = "When ${trigger.label.lowercase()}, " +
-                Automation.describe(
-                    base.copy(trigger = trigger, action = currentAction()),
-                )
-        }
-        doSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                fillValues(actionTypes[pos], 1)
-                refreshPreview()
+        fun addActionRow(a: Automation.Action) {
+            val inner = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
             }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-        listOf(whenSp, valueSp).forEach { sp ->
-            sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            val typeSp = newSpinner(actionTypes.map { it.label }, actionTypes.indexOf(a.type).coerceAtLeast(0))
+            val valueSp = newSpinner(emptyList())
+            fillValues(a.type, valueSp, initialValueIndex(a.type, a))
+            inner.addView(typeSp)
+            inner.addView(valueSp)
+
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            row.addView(inner, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val holder = ActionRow(row, typeSp, valueSp)
+            row.addView(removeButton {
+                // Never leave zero actions: an empty list would save a rule that
+                // does nothing and cannot be edited back from the list.
+                if (actionRows.size <= 1) {
+                    toast("A rule needs at least one action")
+                } else {
+                    actionsBox.removeView(row)
+                    actionRows.remove(holder)
+                    refreshPreview()
+                }
+            })
+            actionsBox.addView(row)
+            actionRows.add(holder)
+
+            typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    fillValues(actionTypes[pos], valueSp, 0)
+                    refreshPreview()
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+            valueSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
                     refreshPreview()
                 override fun onNothingSelected(p: AdapterView<*>?) {}
             }
         }
+
+        linear.addView(caption("DO — applied in this order"))
+        linear.addView(actionsBox)
+        val addAction = android.widget.Button(this).apply {
+            text = "+ Add action"
+            textSize = 12f
+            setTextColor(Color.rgb(127, 212, 168))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                addActionRow(Automation.Action())
+                refreshPreview()
+            }
+        }
+        linear.addView(addAction)
+
+        // ---- conditions ----
+
+        data class ConditionRow(
+            val root: android.widget.LinearLayout,
+            val type: android.widget.Spinner,
+            val days: android.widget.Spinner,
+            val start: android.widget.Spinner,
+            val end: android.widget.Spinner,
+            val worn: android.widget.Spinner,
+            val percent: android.widget.Spinner,
+        )
+
+        val conditionRows = mutableListOf<ConditionRow>()
+        val conditionsBox = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+
+        fun conditionOf(row: ConditionRow): Automation.Condition {
+            val type = Automation.ConditionType.values()[row.type.selectedItemPosition]
+            return when (type) {
+                Automation.ConditionType.TIME_WINDOW -> Automation.Condition(
+                    type = type,
+                    days = when (row.days.selectedItemPosition) {
+                        1 -> setOf(1, 2, 3, 4, 5)
+                        2 -> setOf(6, 7)
+                        else -> emptySet()
+                    },
+                    startMinute = row.start.selectedItemPosition * 30,
+                    endMinute = row.end.selectedItemPosition * 30,
+                )
+                Automation.ConditionType.WORN -> Automation.Condition(
+                    type = type, worn = row.worn.selectedItemPosition == 0,
+                )
+                Automation.ConditionType.BATTERY_ABOVE -> Automation.Condition(
+                    type = type,
+                    percent = percentOptions.getOrElse(row.percent.selectedItemPosition) { 50 },
+                )
+            }
+        }
+
+        fun addConditionRow(c: Automation.Condition) {
+            val typeSp = newSpinner(
+                Automation.ConditionType.values().map { it.label },
+                Automation.ConditionType.values().indexOf(c.type),
+            )
+            val daysSp = newSpinner(
+                listOf("Every day", "Weekdays", "Weekends"),
+                when (c.days) {
+                    emptySet<Int>() -> 0
+                    setOf(1, 2, 3, 4, 5) -> 1
+                    setOf(6, 7) -> 2
+                    else -> 0
+                },
+            )
+            val startSp = newSpinner(clockOptions, (c.startMinute / 30).coerceIn(0, 47))
+            val endSp = newSpinner(clockOptions, (c.endMinute / 30).coerceIn(0, 47))
+            val wornSp = newSpinner(listOf("Worn", "Taken off"), if (c.worn) 0 else 1)
+            val percentSp = newSpinner(
+                percentOptions.map { "above $it%" },
+                percentOptions.indexOf(c.percent).let { if (it < 0) 4 else it },
+            )
+
+            val times = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+            }
+            times.addView(daysSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f))
+            times.addView(startSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            times.addView(endSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val inner = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+            }
+            inner.addView(typeSp)
+            inner.addView(times)
+            inner.addView(wornSp)
+            inner.addView(percentSp)
+
+            fun applyType() {
+                val type = Automation.ConditionType.values()[typeSp.selectedItemPosition]
+                times.visibility = if (type == Automation.ConditionType.TIME_WINDOW) View.VISIBLE else View.GONE
+                wornSp.visibility = if (type == Automation.ConditionType.WORN) View.VISIBLE else View.GONE
+                percentSp.visibility = if (type == Automation.ConditionType.BATTERY_ABOVE) View.VISIBLE else View.GONE
+            }
+
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            row.addView(inner, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val holder = ConditionRow(row, typeSp, daysSp, startSp, endSp, wornSp, percentSp)
+            row.addView(removeButton {
+                conditionsBox.removeView(row)
+                conditionRows.remove(holder)
+                refreshPreview()
+            })
+            conditionsBox.addView(row)
+            conditionRows.add(holder)
+
+            typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    applyType()
+                    refreshPreview()
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+            listOf(daysSp, startSp, endSp, wornSp, percentSp).forEach { sp ->
+                sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
+                        refreshPreview()
+                    override fun onNothingSelected(p: AdapterView<*>?) {}
+                }
+            }
+            applyType()
+        }
+
+        linear.addView(caption("ONLY IF — all must hold"))
+        linear.addView(conditionsBox)
+        val addCondition = android.widget.Button(this).apply {
+            text = "+ Add condition"
+            textSize = 12f
+            setTextColor(Color.rgb(127, 212, 168))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                addConditionRow(Automation.Condition())
+                refreshPreview()
+            }
+        }
+        linear.addView(addCondition)
+
+        val preview = android.widget.TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.rgb(127, 212, 168))
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        linear.addView(preview)
+
+        fun currentRule(): Automation.Rule = base.copy(
+            trigger = triggers[whenSp.selectedItemPosition],
+            actions = actionRows.map { actionOf(it) },
+            conditions = conditionRows.map { conditionOf(it) },
+        )
+
+        refreshPreview = {
+            val r = currentRule()
+            preview.text = "When ${r.trigger.label.lowercase()}: ${Automation.describe(r)}"
+        }
+
+        whenSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
+                refreshPreview()
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+
+        base.actions.forEach { addActionRow(it) }
+        base.conditions.forEach { addConditionRow(it) }
         refreshPreview()
 
         val dialog = android.app.AlertDialog.Builder(this)
             .setTitle(if (existingIndex == null) "New rule" else "Edit rule")
-            .setView(linear)
+            .setView(scroll)
             .setPositiveButton("Save") { _, _ ->
-                val rule = base.copy(
-                    trigger = triggers[whenSp.selectedItemPosition],
-                    action = currentAction(),
-                )
+                val rule = currentRule()
                 automationRules = if (existingIndex == null) {
                     automationRules + rule
                 } else {

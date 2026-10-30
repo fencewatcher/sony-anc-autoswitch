@@ -1709,81 +1709,87 @@ class BluetoothAncService : Service() {
             return
         }
         val rules = automationRules
-        val rule = Automation.resolve(rules, trigger)
+        val rule = Automation.firstMatch(
+            rules,
+            trigger,
+            Automation.State(worn = headphonesWorn, batteryPercent = batteryPercent),
+        )
         if (rule == null) {
             Log.d(tag, "Automation: no rule for ${trigger.id} — leaving state alone")
             return
         }
         Log.d(tag, "Automation: ${trigger.id} → ${Automation.describe(rule)}")
-        when (rule.action.type) {
-            Automation.ActionType.NONE -> Unit
-            Automation.ActionType.SET_MODE -> when (rule.action.mode) {
-                Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
-                Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
-                Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
-            }
-            Automation.ActionType.SET_AMBIENT_LEVEL -> {
-                // Was `profile.ancOn(rule.action.value)`, which builds
-                // [0x68,0x19,0x01,0x01,0x00,...] — byte 4 = 0x00, i.e. the NC
-                // payload. "Set ambient level" therefore switched noise cancelling
-                // ON instead of changing the ambient level. Use the same builder the
-                // UI uses, with the rule's level overriding the stored one.
-                val saved = ambientLevel()
-                val cmd = profile.ambient(
-                    level = rule.action.value,
-                    voice = voicePassthrough(),
-                    noiseAdaptive = autoAmbient(),
-                )
-                sendFrame(cmd)
-                if (rule.action.value != saved) {
-                    // Persist so the UI slider reflects what the routine just set.
-                    val addr = deviceAddress
-                    if (addr != null)
-                        prefs().edit().putInt("ambient_level_$addr", rule.action.value).apply()
+        for (action in rule.actions) {
+            when (action.type) {
+                Automation.ActionType.NONE -> Unit
+                Automation.ActionType.SET_MODE -> when (action.mode) {
+                    Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
+                    Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
+                    Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
                 }
-            }
-            Automation.ActionType.SET_VOLUME -> {
-                // Media volume had no working path on this hardware and was judged
-                // useless, so it was removed rather than left half-wired.
-                Log.d(tag, "Automation: SET_VOLUME no longer supported — ignoring")
-            }
-            Automation.ActionType.SET_EQ_PRESET -> {
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), rule.action.presetId.toByte(), 0x00))
-                delay(120L)
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
-            }
-            // The remaining headphone features. Each reuses the exact builder the
-            // Audio tab uses, so a routine and a manual toggle cannot drift apart.
-            Automation.ActionType.SET_SPEAK_TO_CHAT ->
-                sendFrame(SonyMdrV2.buildSpeakToChatSet(rule.action.value != 0))
-            Automation.ActionType.SET_PAUSE_TAKEN_OFF ->
-                sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(rule.action.value != 0))
-            Automation.ActionType.SET_DSEE ->
-                sendFrame(SonyMdrV2.buildUpscalingSet(rule.action.value != 0))
-            Automation.ActionType.SET_BGM ->
-                sendFrame(SonyMdrV2.buildBgmSet(rule.action.value != 0))
-            Automation.ActionType.SET_UPMIX ->
-                sendFrame(SonyMdrV2.buildUpmixSet(rule.action.value != 0))
-            // These two live in the ambient payload rather than a command of their
-            // own, so the stored pref is flipped and the ambient frame re-sent —
-            // same path as applyAmbientNow(), just driven by a rule.
-            Automation.ActionType.SET_VOICE_PASSTHROUGH -> {
-                setAmbientFlag("voice_passthrough", rule.action.value != 0)
-                sendFrame(sonyAmbientCommand())
-            }
-            Automation.ActionType.SET_AUTO_AMBIENT -> {
-                setAmbientFlag("auto_ambient", rule.action.value != 0)
-                sendFrame(sonyAmbientCommand())
-            }
-            Automation.ActionType.SET_AUTO_POWER -> {
-                val mode = if (rule.action.power == Automation.AutoPower.NEVER)
-                    SonyMdrV2.AutoPowerOff.NEVER else SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF
-                sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode))
-            }
-            Automation.ActionType.SET_VOICE_GUIDANCE -> {
-                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(rule.action.value), SonyMdrV2.Table.T2)
-                delay(120L)
-                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+                Automation.ActionType.SET_AMBIENT_LEVEL -> {
+                    // Was `profile.ancOn(action.value)`, which builds
+                    // [0x68,0x19,0x01,0x01,0x00,...] — byte 4 = 0x00, i.e. the NC
+                    // payload. "Set ambient level" therefore switched noise cancelling
+                    // ON instead of changing the ambient level. Use the same builder the
+                    // UI uses, with the rule's level overriding the stored one.
+                    val saved = ambientLevel()
+                    val cmd = profile.ambient(
+                        level = action.value,
+                        voice = voicePassthrough(),
+                        noiseAdaptive = autoAmbient(),
+                    )
+                    sendFrame(cmd)
+                    if (action.value != saved) {
+                        // Persist so the UI slider reflects what the routine just set.
+                        val addr = deviceAddress
+                        if (addr != null)
+                            prefs().edit().putInt("ambient_level_$addr", action.value).apply()
+                    }
+                }
+                Automation.ActionType.SET_VOLUME -> {
+                    // Media volume had no working path on this hardware and was judged
+                    // useless, so it was removed rather than left half-wired.
+                    Log.d(tag, "Automation: SET_VOLUME no longer supported — ignoring")
+                }
+                Automation.ActionType.SET_EQ_PRESET -> {
+                    sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), action.presetId.toByte(), 0x00))
+                    delay(120L)
+                    sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+                }
+                // The remaining headphone features. Each reuses the exact builder the
+                // Audio tab uses, so a routine and a manual toggle cannot drift apart.
+                Automation.ActionType.SET_SPEAK_TO_CHAT ->
+                    sendFrame(SonyMdrV2.buildSpeakToChatSet(action.value != 0))
+                Automation.ActionType.SET_PAUSE_TAKEN_OFF ->
+                    sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(action.value != 0))
+                Automation.ActionType.SET_DSEE ->
+                    sendFrame(SonyMdrV2.buildUpscalingSet(action.value != 0))
+                Automation.ActionType.SET_BGM ->
+                    sendFrame(SonyMdrV2.buildBgmSet(action.value != 0))
+                Automation.ActionType.SET_UPMIX ->
+                    sendFrame(SonyMdrV2.buildUpmixSet(action.value != 0))
+                // These two live in the ambient payload rather than a command of their
+                // own, so the stored pref is flipped and the ambient frame re-sent —
+                // same path as applyAmbientNow(), just driven by a rule.
+                Automation.ActionType.SET_VOICE_PASSTHROUGH -> {
+                    setAmbientFlag("voice_passthrough", action.value != 0)
+                    sendFrame(sonyAmbientCommand())
+                }
+                Automation.ActionType.SET_AUTO_AMBIENT -> {
+                    setAmbientFlag("auto_ambient", action.value != 0)
+                    sendFrame(sonyAmbientCommand())
+                }
+                Automation.ActionType.SET_AUTO_POWER -> {
+                    val mode = if (action.power == Automation.AutoPower.NEVER)
+                        SonyMdrV2.AutoPowerOff.NEVER else SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF
+                    sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode))
+                }
+                Automation.ActionType.SET_VOICE_GUIDANCE -> {
+                    sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(action.value), SonyMdrV2.Table.T2)
+                    delay(120L)
+                    sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+                }
             }
         }
         refreshNotification()

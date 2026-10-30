@@ -57,6 +57,13 @@
             </intent-filter>
         </activity>
 
+        <!-- Battery history, opened from the battery card. Not on Home: the
+             graph is a question you ask occasionally, not a live readout. -->
+        <activity
+            android:name=".BatteryHistoryActivity"
+            android:exported="false"
+            android:label="Battery history" />
+
         <!-- Hidden: reached only by tapping the headphone image five times. -->
         <activity
             android:name=".DebugActivity"

@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Calendar
 
 /**
  * Customisable "what should happen when…" rules.
@@ -13,9 +14,15 @@ import org.json.JSONObject
  * necessarily the one you want (many people want ANC *always* on, and use the
  * headphones' own ambient mode when they need to hear the world).
  *
- * A [Rule] binds a [Trigger] to a [RuleAction]. Rules are evaluated in order and
- * the first enabled match wins, so ordering is meaningful and a user can put a
- * specific rule above a general one.
+ * A [Rule] binds a [Trigger] to an ordered list of [Action]s, optionally gated
+ * by [Condition]s. Rules are evaluated in order and the first enabled match
+ * wins, so ordering is meaningful and a user can put a specific rule above a
+ * general one.
+ *
+ * One rule carrying several actions is what makes the feature worth having:
+ * "when playback starts, set NC *and* EQ Clear *and* volume 12" is one thought,
+ * and splitting it into three rules that share a trigger would have made the
+ * first one win and silently ignore the other two.
  */
 object Automation {
 
@@ -101,10 +108,43 @@ object Automation {
         val power: AutoPower = AutoPower.WHEN_TAKEN_OFF,
     )
 
+    // ---- Conditions ----
+
+    enum class ConditionType(val id: String, val label: String) {
+        TIME_WINDOW("time_window", "Time window"),
+        WORN("worn", "Worn state"),
+        BATTERY_ABOVE("battery_above", "Battery above"),
+
+        /** Common presets, so the editor does not need a seven-checkbox row. */
+        ;
+
+        companion object {
+            fun from(id: String) = values().firstOrNull { it.id == id } ?: TIME_WINDOW
+        }
+    }
+
+    data class Condition(
+        val type: ConditionType = ConditionType.TIME_WINDOW,
+        /** ISO days, 1 = Monday … 7 = Sunday. Empty means every day. */
+        val days: Set<Int> = emptySet(),
+        val startMinute: Int = 22 * 60,
+        val endMinute: Int = 6 * 60,
+        val worn: Boolean = true,
+        val percent: Int = 50,
+    )
+
+    /** Runtime state a condition is evaluated against. */
+    data class State(
+        val worn: Boolean? = null,
+        val batteryPercent: Int? = null,
+        val now: Long = System.currentTimeMillis(),
+    )
+
     data class Rule(
         val id: String,
         val trigger: Trigger,
-        val action: Action,
+        val actions: List<Action> = listOf(Action()),
+        val conditions: List<Condition> = emptyList(),
         val enabled: Boolean = true,
     )
 
@@ -127,9 +167,49 @@ object Automation {
 
     /** The factory default reproduces the original hard-coded behaviour. */
     fun defaultRules(): List<Rule> = listOf(
-        Rule("start", Trigger.PLAYBACK_START, Action(ActionType.SET_MODE, Mode.NC), true),
-        Rule("stop", Trigger.PLAYBACK_STOP, Action(ActionType.SET_MODE, Mode.AMBIENT), true),
+        Rule("start", Trigger.PLAYBACK_START, listOf(Action(ActionType.SET_MODE, Mode.NC))),
+        Rule("stop", Trigger.PLAYBACK_STOP, listOf(Action(ActionType.SET_MODE, Mode.AMBIENT))),
     )
+
+    // ---- Evaluation ----
+
+    /** First enabled rule for [trigger] whose conditions hold right now. */
+    fun firstMatch(rules: List<Rule>, trigger: Trigger, state: State): Rule? =
+        rules.firstOrNull { it.enabled && it.trigger == trigger && conditionsMet(it, state) }
+
+    fun conditionsMet(rule: Rule, state: State): Boolean =
+        rule.conditions.all { met(it, state) }
+
+    private fun met(c: Condition, s: State): Boolean = when (c.type) {
+        // An unknown wear state must not read as "not worn": that would fire the
+        // wrong branch of a rule before the headphones have answered. Skipping
+        // the rule is the safer failure.
+        ConditionType.WORN -> s.worn != null && s.worn == c.worn
+        ConditionType.BATTERY_ABOVE -> s.batteryPercent != null && s.batteryPercent >= c.percent
+        ConditionType.TIME_WINDOW -> inWindow(c, s.now)
+    }
+
+    private fun inWindow(c: Condition, now: Long): Boolean {
+        val cal = Calendar.getInstance().apply { timeInMillis = now }
+        val minute = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
+        val iso = isoDay(cal.get(Calendar.DAY_OF_WEEK))
+        val start = c.startMinute.coerceIn(0, 1439)
+        val end = c.endMinute.coerceIn(0, 1439)
+        fun dayOk(d: Int) = c.days.isEmpty() || d in c.days
+
+        // start == end reads as "all day": a zero-width window would silently
+        // disable a rule the user believes is active.
+        if (start == end) return dayOk(iso)
+        if (start < end) return dayOk(iso) && minute in start until end
+
+        // Wraps midnight: the evening half belongs to the start day, the morning
+        // half to the day after it.
+        val previousIso = if (iso == 1) 7 else iso - 1
+        return (dayOk(iso) && minute >= start) || (dayOk(previousIso) && minute < end)
+    }
+
+    /** Calendar day (Sunday = 1) to ISO day (Monday = 1). */
+    private fun isoDay(calendarDay: Int): Int = if (calendarDay == Calendar.SUNDAY) 7 else calendarDay - 1
 
     // ---- Serialisation ----
 
@@ -139,52 +219,124 @@ object Automation {
                 put("id", r.id)
                 put("trigger", r.trigger.id)
                 put("enabled", r.enabled)
-                put("action", JSONObject().apply {
-                    put("type", r.action.type.id)
-                    put("mode", r.action.mode.id)
-                    put("value", r.action.value)
-                    put("presetId", r.action.presetId)
-                    put("power", r.action.power.id)
-                })
+                put("actions", JSONArray().apply { r.actions.forEach { put(it.toJson()) } })
+                put("conditions", JSONArray().apply { r.conditions.forEach { put(it.toJson()) } })
             })
         }
     }
 
+    private fun Action.toJson(): JSONObject = JSONObject().apply {
+        put("type", type.id)
+        put("mode", mode.id)
+        put("value", value)
+        put("presetId", presetId)
+        put("power", power.id)
+    }
+
+    private fun Condition.toJson(): JSONObject = JSONObject().apply {
+        put("type", type.id)
+        put("days", JSONArray().apply { days.sorted().forEach { put(it) } })
+        put("startMinute", startMinute)
+        put("endMinute", endMinute)
+        put("worn", worn)
+        put("percent", percent)
+    }
+
     private fun parse(array: JSONArray): List<Rule> = (0 until array.length()).mapNotNull { i ->
         val o = array.optJSONObject(i) ?: return@mapNotNull null
-        val a = o.optJSONObject("action")
+
+        // Legacy shape: a single "action" object, no "actions" array. Reading it
+        // keeps existing installs' rules alive across the upgrade instead of
+        // silently resetting them to the factory pair.
+        val actions = o.optJSONArray("actions")?.let { arr ->
+            (0 until arr.length()).mapNotNull { j -> arr.optJSONObject(j)?.toAction() }
+        } ?: listOfNotNull(o.optJSONObject("action")?.toAction())
+
         Rule(
             id = o.optString("id", "rule$i"),
             trigger = Trigger.from(o.optString("trigger")),
+            actions = actions.ifEmpty { listOf(Action()) },
+            conditions = o.optJSONArray("conditions")?.let { arr ->
+                (0 until arr.length()).mapNotNull { j -> arr.optJSONObject(j)?.toCondition() }
+            } ?: emptyList(),
             enabled = o.optBoolean("enabled", true),
-            action = Action(
-                type = ActionType.from(a?.optString("type") ?: "none"),
-                mode = Mode.from(a?.optString("mode") ?: "nc"),
-                value = a?.optInt("value", 0) ?: 0,
-                presetId = a?.optInt("presetId", 0) ?: 0,
-                power = AutoPower.from(a?.optString("power") ?: "taken_off"),
-            ),
         )
     }
 
-    /** First enabled rule matching [trigger]; `null` means "do nothing". */
-    fun resolve(rules: List<Rule>, trigger: Trigger): Rule? =
-        rules.firstOrNull { it.enabled && it.trigger == trigger }
+    private fun JSONObject.toAction(): Action = Action(
+        type = ActionType.from(optString("type", "none")),
+        mode = Mode.from(optString("mode", "nc")),
+        value = optInt("value", 0),
+        presetId = optInt("presetId", 0),
+        power = AutoPower.from(optString("power", "taken_off")),
+    )
+
+    private fun JSONObject.toCondition(): Condition {
+        val days = mutableSetOf<Int>()
+        optJSONArray("days")?.let { arr -> for (k in 0 until arr.length()) days.add(arr.optInt(k, 0)) }
+        return Condition(
+            type = ConditionType.from(optString("type", "time_window")),
+            days = days.filter { it in 1..7 }.toSet(),
+            startMinute = optInt("startMinute", 22 * 60),
+            endMinute = optInt("endMinute", 6 * 60),
+            worn = optBoolean("worn", true),
+            percent = optInt("percent", 50),
+        )
+    }
+
+    // ---- Presentation ----
 
     fun describe(rule: Rule): String {
-        val t = rule.action.type
-        if (t in ActionType.TOGGLES) return "${t.label}: ${if (rule.action.value != 0) "on" else "off"}"
-        return when (t) {
+        val body = rule.actions
+            .filter { it.type != ActionType.NONE }
+            .joinToString(" + ") { describeAction(it) }
+            .ifEmpty { "Do nothing" }
+        val cond = describeConditions(rule.conditions)
+        return if (cond.isEmpty()) body else "$body, $cond"
+    }
+
+    fun describeAction(a: Action): String {
+        if (a.type in ActionType.TOGGLES) return "${a.type.label}: ${if (a.value != 0) "on" else "off"}"
+        return when (a.type) {
             ActionType.NONE -> "Do nothing"
-            ActionType.SET_MODE -> "Set ${rule.action.mode.label.lowercase()}"
-            ActionType.SET_AMBIENT_LEVEL -> "Set ambient level to ${rule.action.value}"
-            ActionType.SET_VOLUME -> "Set volume to ${rule.action.value}"
-            ActionType.SET_EQ_PRESET -> "Set EQ to ${presetName(rule.action.presetId)}"
-            ActionType.SET_AUTO_POWER -> "Auto power off: ${rule.action.power.label.lowercase()}"
-            ActionType.SET_VOICE_GUIDANCE -> "Voice guidance volume ${rule.action.value}"
-            else -> t.label
+            ActionType.SET_MODE -> "Set ${a.mode.label.lowercase()}"
+            ActionType.SET_AMBIENT_LEVEL -> "Set ambient level to ${a.value}"
+            ActionType.SET_VOLUME -> "Set volume to ${a.value}"
+            ActionType.SET_EQ_PRESET -> "Set EQ to ${presetName(a.presetId)}"
+            ActionType.SET_AUTO_POWER -> "Auto power off: ${a.power.label.lowercase()}"
+            ActionType.SET_VOICE_GUIDANCE -> "Voice guidance volume ${a.value}"
+            else -> a.type.label
         }
     }
+
+    fun describeConditions(conditions: List<Condition>): String {
+        if (conditions.isEmpty()) return ""
+        val parts = conditions.map { c ->
+            when (c.type) {
+                ConditionType.WORN -> if (c.worn) "when worn" else "when taken off"
+                ConditionType.BATTERY_ABOVE -> "above ${c.percent}%"
+                ConditionType.TIME_WINDOW ->
+                    "${clock(c.startMinute)}–${clock(c.endMinute)} on ${daysLabel(c.days)}"
+            }
+        }
+        return "only " + parts.joinToString(" and ")
+    }
+
+    fun daysLabel(days: Set<Int>): String = when {
+        days.isEmpty() || days.size == 7 -> "every day"
+        days == setOf(1, 2, 3, 4, 5) -> "weekdays"
+        days == setOf(6, 7) -> "weekends"
+        else -> days.sorted().joinToString(", ") {
+            listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")[it - 1]
+        }
+    }
+
+    fun clock(minuteOfDay: Int): String {
+        val m = ((minuteOfDay % 1440) + 1440) % 1440
+        return "%02d:%02d".format(m / 60, m % 60)
+    }
+
+    fun toMinute(hour: Int, minute: Int): Int = hour * 60 + minute
 
     fun presetName(id: Int): String = when (id) {
         0x00 -> "Off"

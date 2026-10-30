@@ -4,7 +4,7 @@
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v2.03](https://img.shields.io/badge/version-2.03-blue)
+![v2.04](https://img.shields.io/badge/version-2.04-blue)
 
 ---
 
@@ -13,7 +13,7 @@
 ### Behaviour
 
 - **🎵 Auto ANC** — Switches NC/Ambient/Off based on media playback (Spotify, YouTube Music, podcast apps, …)
-- **⚙️ Customisable automations** — Rules with triggers (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head) and actions (nothing, set noise control, set ambient level, set volume, set EQ preset). Rules evaluate in order, first match wins.
+- **⚙️ Customisable automations** — Rules bind a trigger (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head, battery low) to an ordered list of actions (noise control, ambient level, volume, EQ preset, speak-to-chat, pause when taken off, DSEE, BGM, upmix, voice passthrough, auto ambient, auto power off, voice guidance). One rule can set several things at once, and optional conditions scope it to a time window, the wear state, or a battery floor. Rules evaluate in order, first match wins.
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough and auto-ambient settings
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification; both stay in sync
@@ -26,7 +26,7 @@
 - **👕 Wear detection** — Asks the headphones whether they're on your head, rather than inferring it. Green when worn, yellow when off, and drives the on/off-head automation triggers.
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
-- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down. Every sample is tagged with its context (NC mode, worn, media playing) and the estimate prefers the drain rate of the current context, falling back to the blended rate. A reconnect or a service restart no longer blanks the estimate: the discharge segment is split only by a corroborated, same-source rise (charging), not by a coarse stack reading that happens to sit above the last MDR one, and while a fresh segment is still too young the newest earlier segment supplies a rough rate
+- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down. Every sample is tagged with its context (NC mode, worn, media playing) and the estimate prefers the drain rate of the current context, falling back to the blended rate. A reconnect or a service restart no longer blanks the estimate: the discharge segment is split only by a corroborated, same-source rise (charging), not by a coarse stack reading that happens to sit above the last MDR one, and while a fresh segment is still too young the newest earlier segment supplies a rough rate. Tap the card for a history screen: up to 14 days of samples, charging stretches in green, gaps left unjoined, and the measured drain per noise-control mode behind the estimate.
 
 ### Controls
 

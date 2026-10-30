@@ -74,6 +74,9 @@ object BatteryHistory {
 
     data class Estimate(val minutes: Int, val reliable: Boolean)
 
+    /** Measured drain for one noise-control mode, over the sampled window. */
+    data class DrainStat(val mode: Int, val perHour: Double, val observedMs: Long)
+
     private val lock = Any()
     private val byDevice = LinkedHashMap<String, MutableList<Sample>>()
     private var loaded = false
@@ -272,6 +275,60 @@ object BatteryHistory {
         } else {
             "≈ ${kotlin.math.ceil(e.minutes / 60.0).toInt().coerceAtLeast(1)}h"
         }
+    }
+
+    // ---- History access for the graph screen ----
+
+    /** A copy of the samples for [address], oldest first. */
+    fun historyFor(address: String, since: Long = 0L): List<Sample> = synchronized(lock) {
+        byDevice[address]?.filter { it.t >= since } ?: emptyList()
+    }
+
+    /**
+     * Drain per noise-control mode, measured within discharge segments only.
+     *
+     * Charging stretches and long silent gaps are excluded for the same reason
+     * the estimator excludes them: a slope taken across a charge or across an
+     * absence describes nothing. This is the number behind the estimate, shown
+     * so it can be argued with.
+     */
+    fun drainByMode(address: String, since: Long): List<DrainStat> = synchronized(lock) {
+        val list = (byDevice[address] ?: return emptyList()).filter { it.t >= since }
+        if (list.size < 4) return emptyList()
+        val events = chargeEvents(list)
+        val bounds = events.toMutableList().also { it.add(list.size) }
+        val drop = mutableMapOf<Int, Int>()
+        val span = mutableMapOf<Int, Long>()
+        var from = 0
+        for (end in bounds) {
+            // Walk one discharge segment [from, end).
+            for (i in from + 1 until end) {
+                val prev = list[i - 1]
+                val cur = list[i]
+                val dt = cur.t - prev.t
+                if (dt <= 0 || dt > MAX_GAP_MS) continue
+                val mode = (prev.ctx shr 2) and 3
+                if (mode == 0 || mode != ((cur.ctx shr 2) and 3)) continue
+                val fall = prev.p - cur.p
+                if (fall <= 0) continue
+                drop[mode] = (drop[mode] ?: 0) + fall
+                span[mode] = (span[mode] ?: 0L) + dt
+            }
+            from = end + 1
+        }
+        drop.mapNotNull { (mode, d) ->
+            val ms = span[mode] ?: return@mapNotNull null
+            if (ms < 20L * 60 * 1000) return@mapNotNull null
+            DrainStat(mode, d.toDouble() / (ms / 3_600_000.0), ms)
+        }.sortedBy { it.mode }
+    }
+
+    /** Mode bits (0 unknown, 1 NC, 2 ambient, 3 off) → label. */
+    fun modeLabel(mode: Int): String = when (mode) {
+        1 -> "Noise cancelling"
+        2 -> "Ambient"
+        3 -> "Off"
+        else -> "Unknown"
     }
 
     private fun storeFile(context: Context) = File(context.filesDir, "battery_history.json")
