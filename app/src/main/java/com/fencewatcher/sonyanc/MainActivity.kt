@@ -1469,7 +1469,12 @@ class MainActivity : AppCompatActivity() {
             "xm6" -> "Protocol: WH-1000XM6 (pinned)"
             else -> {
                 val guess = HeadphoneProfile.detect(deviceName).modelName
-                val warn = if (deviceName.contains("XM", ignoreCase = true)) "" else "  ·  name not recognised"
+                // The default call sites pass no name, and the old code then
+                // announced "name not recognised" next to a correctly detected
+                // model. Only warn when there is a name and it does not look Sony.
+                val warn = if (deviceName.isBlank() || deviceName.contains("WH-1000", true) ||
+                    deviceName.contains("WF-1000", true) || deviceName.contains("XM", true)
+                ) "" else "  ·  unrecognised name"
                 "Protocol: $guess$warn"
             }
         }

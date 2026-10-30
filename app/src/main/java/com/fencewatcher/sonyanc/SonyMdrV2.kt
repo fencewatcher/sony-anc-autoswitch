@@ -331,6 +331,21 @@ object SonyMdrV2 {
     fun buildFwVersionGet(): ByteArray =
         byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_DISPLAY_FW_VERSION.toByte())
 
+    /**
+     * Whether a byte is one of the preset codes the decompile names.
+     *
+     * The XM6 answers `f6 03` with `f7 03 02 04 d0`, and neither 0x04 nor 0xD0
+     * is in the v1 or v2 preset enum. So the reply is not the documented shape
+     * on this firmware. Rather than render `0x04` as a preset name, callers use
+     * this to reject the whole reply and show nothing.
+     */
+    fun isKnownTouchPanelPreset(v: Int): Boolean = when (v) {
+        0x00, 0x20, 0x21, 0x22, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
+        0x36, 0x38, 0x45, 0x46, 0x47, 0x70, 0x71, 0x72, 0xFF,
+        -> true
+        else -> false
+    }
+
     fun upscalingStatusName(v: Int): String = when (v) {
         UPSCALING_STATUS_OFF -> "off"
         UPSCALING_STATUS_VALID -> "valid"

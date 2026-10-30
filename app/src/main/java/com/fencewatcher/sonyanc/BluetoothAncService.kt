@@ -1220,10 +1220,17 @@ class BluetoothAncService : Service() {
                     val count = p.getOrNull(2)?.toInt()?.and(0xFF) ?: -1
                     if (count in 1..(p.size - 3)) {
                         val presets = IntArray(count) { p[3 + it].toInt() and 0xFF }
-                        if (!presets.contentEquals(touchPanelPresets ?: IntArray(0))) {
-                            touchPanelPresets = presets
-                            Log.d(tag, "Touch panel: " + presets.joinToString { SonyMdrV2.touchPanelPresetName(it) })
-                            broadcastStats()
+                        // The XM6 answers with codes that are not in the preset
+                        // enum (`02 04 d0`). Accept only replies we can name, so
+                        // the UI never shows a raw byte as if it were a setting.
+                        if (presets.all { SonyMdrV2.isKnownTouchPanelPreset(it) }) {
+                            if (!presets.contentEquals(touchPanelPresets ?: IntArray(0))) {
+                                touchPanelPresets = presets
+                                Log.d(tag, "Touch panel: " + presets.joinToString { SonyMdrV2.touchPanelPresetName(it) })
+                                broadcastStats()
+                            }
+                        } else {
+                            Log.d(tag, "Assignable settings (undecoded): ${SonyMdrV2.hex(p)}")
                         }
                     } else {
                         Log.d(tag, "Assignable settings: ${SonyMdrV2.hex(p)}")
@@ -1301,7 +1308,9 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildQuickAccessEnableGet())
         request(SonyMdrV2.buildQuickAccessFunctionGet())
         request(SonyMdrV2.buildUpscalingStatusGet())
-        request(SonyMdrV2.buildFwVersionGet())
+        // `12 09` (DISPLAY_FW_VERSION) gets no reply on the XM6 — confirmed in the
+        // frame log, two retries and then silence. Asking it every sweep cost ~1.4s
+        // for nothing, so it is not polled. The parser stays for models that answer.
         request(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
         request(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
