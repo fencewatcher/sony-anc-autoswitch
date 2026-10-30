@@ -1110,17 +1110,6 @@ class BluetoothAncService : Service() {
                         }
                         broadcastStats()
                     }
-                    subtype == SonyMdrV2.COMMON_TYPE_DISPLAY_FW_VERSION && p.size >= 4 -> {
-                        val len = p[2].toInt() and 0xFF
-                        if (p.size >= 3 + len) {
-                            val version = String(p, 3, len, Charsets.UTF_8).trim()
-                            if (version.isNotEmpty() && version != fwVersion) {
-                                fwVersion = version
-                                Log.d(tag, "Firmware: $version")
-                                broadcastStats()
-                            }
-                        }
-                    }
                     subtype == SonyMdrV2.COMMON_TYPE_UPSCALING_EFFECT && p.size >= 4 -> {
                         val effect = p[2].toInt() and 0xFF
                         val st = p[3].toInt() and 0xFF
@@ -1208,36 +1197,6 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            // SYSTEM_RET_PARAM (0xF7) — answers a 0xF6 SYSTEM_GET_PARAM. The
-            // button mapping arrives here: buildAssignableSettingsGet() is f6 03,
-            // so the reply is f7 03, not f3 03. Nothing parsed this before, and
-            // the payload layout is still unknown, so it is logged verbatim rather
-            // than decoded. An empty reply means the XM6 does not expose it.
-            SonyMdrV2.CMD_SYSTEM_RET_PARAM -> {
-                val ptype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
-                if (ptype == SonyMdrV2.SYS_TYPE_ASSIGNABLE_SETTINGS) {
-                    // f7 03 <count> <preset…>; count must equal the bytes that follow.
-                    val count = p.getOrNull(2)?.toInt()?.and(0xFF) ?: -1
-                    if (count in 1..(p.size - 3)) {
-                        val presets = IntArray(count) { p[3 + it].toInt() and 0xFF }
-                        // The XM6 answers with codes that are not in the preset
-                        // enum (`02 04 d0`). Accept only replies we can name, so
-                        // the UI never shows a raw byte as if it were a setting.
-                        if (presets.all { SonyMdrV2.isKnownTouchPanelPreset(it) }) {
-                            if (!presets.contentEquals(touchPanelPresets ?: IntArray(0))) {
-                                touchPanelPresets = presets
-                                Log.d(tag, "Touch panel: " + presets.joinToString { SonyMdrV2.touchPanelPresetName(it) })
-                                broadcastStats()
-                            }
-                        } else {
-                            Log.d(tag, "Assignable settings (undecoded): ${SonyMdrV2.hex(p)}")
-                        }
-                    } else {
-                        Log.d(tag, "Assignable settings: ${SonyMdrV2.hex(p)}")
-                    }
-                }
-            }
-
             // SENSE (wearing / adaptive control). Not driven yet — the XM6
             // semantics are not understood well enough to write to. Captured raw
             // so the format can be learned from real hardware instead of guessed.
@@ -1295,10 +1254,6 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildBgmGet())
         request(SonyMdrV2.buildUpmixGet())
         request(SonyMdrV2.buildConnectionModeGet(isXm5()))
-        // Button mapping. The reply shape is not established yet, so it is
-        // captured raw rather than parsed -- this is the step that makes the
-        // [NC/AMB] remap possible instead of guessed at.
-        request(SonyMdrV2.buildAssignableSettingsGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
@@ -2031,17 +1986,6 @@ class BluetoothAncService : Service() {
     var quickAccessEnabled: Boolean? = null
         private set
 
-    /**
-     * Firmware version string, read-only. There is deliberately no updater in
-     * this app — see sony-app-re/replacement-plan.md §3.1.
-     */
-    var fwVersion: String? = null
-        private set
-
-    /** Touch panel preset per slot, as reported by `f7 03`. Read-only. */
-    var touchPanelPresets: IntArray? = null
-        private set
-
     /** Per-button quick access functions. Index 0 = left, 1 = right. */
     var quickAccessFunctions: IntArray? = null
         private set
@@ -2117,7 +2061,6 @@ class BluetoothAncService : Service() {
             if (message != null) putExtra(EXTRA_MESSAGE, message)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
-            fwVersion?.let { putExtra(EXTRA_FW_VERSION, it) }
             `package` = packageName
         }
         try {
@@ -2132,8 +2075,6 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
-            fwVersion?.let { putExtra(EXTRA_FW_VERSION, it) }
-            touchPanelPresets?.let { putExtra(EXTRA_TOUCH_PANEL, it) }
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
             eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
             if (connectedDevices.isNotEmpty()) {
@@ -2320,8 +2261,6 @@ class BluetoothAncService : Service() {
         // Broadcast extras
         const val EXTRA_BATTERY = "battery"
         const val EXTRA_MODE = "mode"
-        const val EXTRA_FW_VERSION = "fw_version"
-        const val EXTRA_TOUCH_PANEL = "touch_panel"
 
         // Reconnection
         // Bounded on purpose. The old budget of 20 attempts with a 48s ceiling

@@ -312,39 +312,12 @@ object SonyMdrV2 {
     // the app belongs to the party-speaker and heart-rate-sensor features only.
     const val COMMON_TYPE_UPSCALING_EFFECT = 0x03
 
-    /**
-     * Firmware version readout — `12 09` → `13 09 <len> <ascii…>`.
-     *
-     * Confirmed from `ef0/l.java`: the reply validates as
-     * `bArr.length - 3 == bArr[2]`, i.e. the version is a length-prefixed
-     * string at offset 3. This is read-only on purpose; this app has no
-     * firmware updater (see sony-app-re/replacement-plan.md §3.1).
-     */
-    const val COMMON_TYPE_DISPLAY_FW_VERSION = 0x09
     const val UPSCALING_STATUS_OFF = 0x00
     const val UPSCALING_STATUS_VALID = 0x01
     const val UPSCALING_STATUS_INVALID = 0x02
 
     fun buildUpscalingStatusGet(): ByteArray =
         byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_UPSCALING_EFFECT.toByte())
-
-    fun buildFwVersionGet(): ByteArray =
-        byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_DISPLAY_FW_VERSION.toByte())
-
-    /**
-     * Whether a byte is one of the preset codes the decompile names.
-     *
-     * The XM6 answers `f6 03` with `f7 03 02 04 d0`, and neither 0x04 nor 0xD0
-     * is in the v1 or v2 preset enum. So the reply is not the documented shape
-     * on this firmware. Rather than render `0x04` as a preset name, callers use
-     * this to reject the whole reply and show nothing.
-     */
-    fun isKnownTouchPanelPreset(v: Int): Boolean = when (v) {
-        0x00, 0x20, 0x21, 0x22, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
-        0x36, 0x38, 0x45, 0x46, 0x47, 0x70, 0x71, 0x72, 0xFF,
-        -> true
-        else -> false
-    }
 
     fun upscalingStatusName(v: Int): String = when (v) {
         UPSCALING_STATUS_OFF -> "off"
@@ -898,43 +871,6 @@ object SonyMdrV2 {
     // ---- Assignable button / sensor + call capture (T1 SYSTEM) ----
 
     const val SYS_TYPE_CALL_SETTINGS = 0x08
-
-    fun buildAssignableSettingsGet(): ByteArray =
-        byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte())
-
-    /**
-     * Reply to [buildAssignableSettingsGet]: `f7 03 <count> <preset…>`.
-     *
-     * Confirmed from `cg0/g.java`: the first byte after the type is the count,
-     * and it must equal the number of bytes that follow. The list is the touch
-     * panel preset per slot, in the device's own order — the code does not name
-     * the slots, so this app shows them positionally rather than guessing that
-     * index 0 is the left panel.
-     */
-    fun touchPanelPresetName(v: Int): String = when (v) {
-        0x00 -> "Ambient sound control"
-        0x20 -> "Playback control"
-        0x21 -> "Track control"
-        0x22 -> "Playback (assistant limited)"
-        0x30 -> "Voice recognition"
-        0x31 -> "Google Assistant"
-        0x32 -> "Amazon Alexa"
-        0x33 -> "Tencent Xiaowei"
-        0x34 -> "Microsoft"
-        0x35 -> "Ambient / Quick Access"
-        0x36 -> "Quick Access"
-        0x38 -> "Microsoft Teams"
-        0x45 -> "Ambient sound control (mic)"
-        0x46 -> "Listening mode / Quick Access"
-        0x47 -> "Ambient / Listening mode"
-        0x70 -> "Chat mix"
-        0x71 -> "Custom 1"
-        0x72 -> "Custom 2"
-        0xFF -> "No function"
-        else -> "0x%02x".format(v)
-    }
-    fun buildAssignableSettingsSet(bytes: ByteArray): ByteArray =
-        byteArrayOf(CMD_SYSTEM_SET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte()) + bytes
 
     fun buildCallSettingsGet(): ByteArray =
         byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_CALL_SETTINGS.toByte())

@@ -31,8 +31,6 @@ What that covers, and what it deliberately does not, is in
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
 - **🔋 Battery + mode display** — Battery level and current ANC mode in the headphone card
-- **🏷️ Firmware version** — Read over the protocol and shown as a chip. Read-only: this app has no firmware updater, because Sony signs the images and a third-party flasher is a brick risk.
-- **👆 Touch panel presets** — Reads back which preset each slot is set to. Read-only for now: the reply lists the presets but not the gesture mapping, so a blind write could erase it.
 
 ### Controls
 

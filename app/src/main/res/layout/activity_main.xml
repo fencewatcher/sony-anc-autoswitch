@@ -236,16 +236,6 @@
                                     android:text="—"
                                     android:textColor="@color/accent"
                                     android:textSize="12sp" />
-
-                                <TextView
-                                    android:id="@+id/textFirmware"
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
-                                    android:text="FW —"
-                                    android:textColor="@color/text_tertiary"
-                                    android:textSize="11sp"
-                                    android:visibility="gone" />
                             </LinearLayout>
                         </LinearLayout>
                     </LinearLayout>
@@ -962,40 +952,6 @@
                         style="@style/TonalButton"
                         android:layout_width="match_parent"
                         android:text="Fix playback to this phone" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginBottom="12dp"
-                app:cardBackgroundColor="@color/surface"
-                app:cardCornerRadius="20dp"
-                app:cardElevation="0dp"
-                app:strokeColor="@color/outline"
-                app:strokeWidth="1dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="20dp">
-
-                    <TextView
-                        style="@style/SectionLabel"
-                        android:text="TOUCH PANEL" />
-
-                    <TextView
-                        android:id="@+id/textTouchPanel"
-                        style="@style/BodyText"
-                        android:text="Not reported by the headphones" />
-
-                    <TextView
-                        style="@style/BodyText"
-                        android:paddingTop="6dp"
-                        android:textColor="@color/text_tertiary"
-                        android:textSize="11sp"
-                        android:text="Read-only: the reply lists the active presets but not the gesture mapping, so writing blind could erase it." />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
