@@ -1216,7 +1216,18 @@ class BluetoothAncService : Service() {
             SonyMdrV2.CMD_SYSTEM_RET_PARAM -> {
                 val ptype = p.getOrNull(1)?.toInt()?.and(0xFF) ?: -1
                 if (ptype == SonyMdrV2.SYS_TYPE_ASSIGNABLE_SETTINGS) {
-                    Log.d(tag, "Assignable settings: ${SonyMdrV2.hex(p)}")
+                    // f7 03 <count> <preset…>; count must equal the bytes that follow.
+                    val count = p.getOrNull(2)?.toInt()?.and(0xFF) ?: -1
+                    if (count in 1..(p.size - 3)) {
+                        val presets = IntArray(count) { p[3 + it].toInt() and 0xFF }
+                        if (!presets.contentEquals(touchPanelPresets ?: IntArray(0))) {
+                            touchPanelPresets = presets
+                            Log.d(tag, "Touch panel: " + presets.joinToString { SonyMdrV2.touchPanelPresetName(it) })
+                            broadcastStats()
+                        }
+                    } else {
+                        Log.d(tag, "Assignable settings: ${SonyMdrV2.hex(p)}")
+                    }
                 }
             }
 
@@ -2018,6 +2029,10 @@ class BluetoothAncService : Service() {
     var fwVersion: String? = null
         private set
 
+    /** Touch panel preset per slot, as reported by `f7 03`. Read-only. */
+    var touchPanelPresets: IntArray? = null
+        private set
+
     /** Per-button quick access functions. Index 0 = left, 1 = right. */
     var quickAccessFunctions: IntArray? = null
         private set
@@ -2109,6 +2124,7 @@ class BluetoothAncService : Service() {
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
             fwVersion?.let { putExtra(EXTRA_FW_VERSION, it) }
+            touchPanelPresets?.let { putExtra(EXTRA_TOUCH_PANEL, it) }
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
             eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
             if (connectedDevices.isNotEmpty()) {
@@ -2296,6 +2312,7 @@ class BluetoothAncService : Service() {
         const val EXTRA_BATTERY = "battery"
         const val EXTRA_MODE = "mode"
         const val EXTRA_FW_VERSION = "fw_version"
+        const val EXTRA_TOUCH_PANEL = "touch_panel"
 
         // Reconnection
         // Bounded on purpose. The old budget of 20 attempts with a 48s ceiling

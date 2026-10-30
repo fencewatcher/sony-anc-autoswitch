@@ -886,6 +886,38 @@ object SonyMdrV2 {
 
     fun buildAssignableSettingsGet(): ByteArray =
         byteArrayOf(CMD_SYSTEM_GET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte())
+
+    /**
+     * Reply to [buildAssignableSettingsGet]: `f7 03 <count> <preset…>`.
+     *
+     * Confirmed from `cg0/g.java`: the first byte after the type is the count,
+     * and it must equal the number of bytes that follow. The list is the touch
+     * panel preset per slot, in the device's own order — the code does not name
+     * the slots, so this app shows them positionally rather than guessing that
+     * index 0 is the left panel.
+     */
+    fun touchPanelPresetName(v: Int): String = when (v) {
+        0x00 -> "Ambient sound control"
+        0x20 -> "Playback control"
+        0x21 -> "Track control"
+        0x22 -> "Playback (assistant limited)"
+        0x30 -> "Voice recognition"
+        0x31 -> "Google Assistant"
+        0x32 -> "Amazon Alexa"
+        0x33 -> "Tencent Xiaowei"
+        0x34 -> "Microsoft"
+        0x35 -> "Ambient / Quick Access"
+        0x36 -> "Quick Access"
+        0x38 -> "Microsoft Teams"
+        0x45 -> "Ambient sound control (mic)"
+        0x46 -> "Listening mode / Quick Access"
+        0x47 -> "Ambient / Listening mode"
+        0x70 -> "Chat mix"
+        0x71 -> "Custom 1"
+        0x72 -> "Custom 2"
+        0xFF -> "No function"
+        else -> "0x%02x".format(v)
+    }
     fun buildAssignableSettingsSet(bytes: ByteArray): ByteArray =
         byteArrayOf(CMD_SYSTEM_SET_PARAM.toByte(), SYS_TYPE_ASSIGNABLE_SETTINGS.toByte()) + bytes
 
