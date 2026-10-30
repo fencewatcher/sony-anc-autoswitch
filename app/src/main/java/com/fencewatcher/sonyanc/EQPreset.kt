@@ -1,6 +1,6 @@
 package com.fencewatcher.sonyanc
 
-/** EQ presets for WH-1000XM5/XM6, from xm6-control reverse-engineering. */
+/** EQ presets for WH-1000XM6, from xm6-control reverse-engineering. */
 enum class EQPreset(val id: Int, val displayName: String) {
     OFF(0x00, "Off (Flat)"),
     HEAVY(0x30, "Heavy"),

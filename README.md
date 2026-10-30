@@ -1,6 +1,6 @@
 # Sony ANC Auto-Switch
 
-> Automatically toggles ANC on your Sony WH-1000XM6/XM5 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and a live readout of what the headphones are actually doing.
+> Automatically toggles ANC on your Sony WH-1000XM6 headphones when media plays or pauses — with a built-in **visual EQ**, **per-device profiles**, and a live readout of what the headphones are actually doing.
 
 This is also the base for a **local replacement for Sony | Sound Connect**: same
 headphone control, no Sony account, no telemetry, and no `INTERNET` permission.
@@ -9,7 +9,7 @@ What that covers, and what it deliberately does not, is in
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v1.65](https://img.shields.io/badge/version-1.65-blue)
+![v2.04](https://img.shields.io/badge/version-2.04-blue)
 
 ---
 
@@ -18,27 +18,29 @@ What that covers, and what it deliberately does not, is in
 ### Behaviour
 
 - **🎵 Auto ANC** — Switches NC/Ambient/Off based on media playback (Spotify, YouTube Music, podcast apps, …)
-- **⚙️ Customisable automations** — Rules with triggers (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head, **activity: still / walking / running / in a vehicle**) and actions (nothing, set noise control, set ambient level, set volume, set EQ preset). Rules evaluate in order, first match wins.
+- **⚙️ Customisable automations** — Rules bind a trigger (playback starts, playback stops, headphones connect, headphones disconnect, headphones on/off head, battery low, **activity: still / walking / running / in a vehicle**) to an ordered list of actions (noise control, ambient level, volume, EQ preset, speak-to-chat, pause when taken off, DSEE, BGM, upmix, voice passthrough, auto ambient, auto power off, voice guidance). One rule can set several things at once, and optional conditions scope it to a time window, the wear state, or a battery floor. Rules evaluate in order, first match wins.
 - **🏃 On-device activity detection** — Classified from the accelerometer and step detector. No Play Services, no location permission, nothing sent anywhere. It only runs while an enabled rule uses it.
 - **📁 Per-device settings** — Each headphone remembers its own ambient level, voice passthrough and auto-ambient settings
 - **🔒 Playback lock ("Fix Playback")** — Pin audio to this phone so a second paired device can't steal it
 - **⏸️ Pause auto-switching** — Stop routines reacting to play/pause, from the Home tab or the notification; both stay in sync
-- **🔄 Auto-reconnect** — Exponential backoff when Bluetooth drops
+- **🔄 Auto-reconnect** — Exponential backoff when Bluetooth drops, and a **Waiting** state once the headphones look absent: the service stays alive and picks them up the moment they return, instead of reading as "stopped"
+- **🧹 Clean stop** — stopping the service clears battery and mode readouts instead of leaving stale values on the card; a frame that is not a battery status reading (wrong length, or a charging flag that is not 0–2) is ignored as protocol noise rather than shown as a level
+- **⚡ Retry now** — Skip the reconnect backoff with one tap on the Home card or the notification while the headphones are away
 
 ### Readouts — verified on hardware
 
 - **👕 Wear detection** — Asks the headphones whether they're on your head, rather than inferring it. Green when worn, yellow when off, and drives the on/off-head automation triggers.
 - **🎧 Active codec** — Reads back whether LDAC or AAC is actually running.
 - **🔊 Media volume + voice guidance volume** — read back and set through the device
-- **🔋 Battery + mode display** — Battery level and current ANC mode in the headphone card
+- **🔋 Battery card & estimate** — Battery in its own card, with a time-to-empty estimate ("≈ 4h 12m" when reliable, "≈ 5h" when the data is thin, "--" while charging or without enough data); sampled over the MDR link *and* from Android's Bluetooth battery feed, so samples keep flowing even when the MDR link is down. Every sample is tagged with its context (NC mode, worn, media playing) and the estimate prefers the drain rate of the current context, falling back to the blended rate. A reconnect or a service restart no longer blanks the estimate: the discharge segment is split only by a corroborated, same-source rise (charging), not by a coarse stack reading that happens to sit above the last MDR one, and while a fresh segment is still too young the newest earlier segment supplies a rough rate. Tap the card for a history screen: up to 14 days of samples, charging stretches in green, gaps left unjoined, and the measured drain per noise-control mode behind the estimate.
 
 ### Controls
 
 - **🎛️ Visual EQ** — Drag the frequency response curve (10 bands, 31 Hz–16 kHz, ±6 dB)
   - 8 presets: Off, Heavy, Clear, Hard, Soft, Custom, User 1, User 2
   - Write custom bands to Custom, User 1 or User 2
-  - EQ state read back from the headphones — sliders show the actual current curve
-- **📶 Multipoint** — List paired devices, see the active source, switch, connect/disconnect, unpair
+  - EQ state read back from the headphones — the curve always shows what's actually set; editing is enabled only while an editable slot (Custom/User) is selected, and the status label holds steady through a write instead of flickering between values
+- **📶 Multipoint** — List paired devices with connected/active indicators (connected first), switch the active source, lock playback, unpair
 - **🖐️ Quick Access** — Choose what a double- or triple-press of the [NC/AMB] button launches
 - **⏻ Power off** — Shut the headphones down from the app
 - **⚡ Quick mode buttons** — Tap NC/Ambient/Off directly from the Home tab
@@ -51,7 +53,7 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 
 | Tab | Content |
 |---|---|
-| **Home** | Headphone card (model, battery, mode, wear indicator, codec), Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
+| **Home** | Headphone card (Bluetooth name, mode, wear indicator, codec), battery card with estimate, Start/Stop, quick NC/Ambient/Off, pause auto-switching, power off |
 | **Audio** | EQ presets + draggable curve, ambient, voice passthrough, speak-to-chat, DSEE, BGM, upmix, voice guidance |
 | **Devices** | Headphone picker, connection mode, multipoint list, playback lock, pairing mode |
 | **Routines** | Quick Access shortcuts, then your automation rules |
@@ -67,7 +69,7 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 1. A foreground service connects over **Bluetooth RFCOMM** using the reverse-engineered Sony MDR protocol
 2. It monitors media sessions via `MediaSessionManager` / `AudioManager`
 3. Media plays → sends the ANC-on payload; paused → ambient payload
-4. Bluetooth drops → automatic reconnection with backoff
+4. Bluetooth drops → automatic reconnection with backoff; when the headphones are genuinely away the service enters **Waiting** — still running, still watching, and it reconnects on its own when they come back. A **Retry now** button skips the backoff.
 5. State is read back from the headphones with a real stop-and-wait request/response exchange
 
 ### Known gaps
@@ -82,8 +84,13 @@ Ambient level, voice passthrough, auto-ambient, speak-to-chat, pause when taken 
 ## Requirements
 
 - **Android 8.0+** (API 26)
-- A **paired** Sony WH-1000XM6 or XM5 (or compatible)
+- A **paired** Sony WH-1000XM6 (or compatible)
 - Bluetooth enabled
+
+**WH-1000XM5 is not supported.** Its protocol paths were never verified on real
+hardware — connections half-worked and readouts were wrong — so XM5 support was
+scrapped in v1.83 rather than shipped broken. The service refuses an XM5 by
+device name.
 
 ## Building
 
@@ -121,10 +128,9 @@ The APK records its commit hash as `BUILD_HASH`, shown at the bottom of the Home
 
 The service implements the Sony **MDR** (Music Data Relay) protocol over Bluetooth Classic RFCOMM.
 
-- **Service UUIDs:** `956c7b26-…` (XM6, v2) or `96cc203e-…` (XM5, v1)
+- **Service UUIDs:** `956c7b26-…` (MDR v2)
 - **Frame:** `SOF(0x3E) | dataType | seq | size(4B BE) | payload | checksum | EOF(0x3C)`
 - **ANC payload (XM6):** `68 19 01 <enable> <mode> <av> <level> <na> <naSens>` (9 bytes)
-- **ANC payload (XM5):** `68 18 01 <totalEffect> <mode> <av> <level>` (7 bytes)
 - **EQ preset:** `58 00 <presetID> 00`, then re-query `56 00`
 - **Custom EQ:** `58 00 <profileID> <count> <bands…>`, then re-query
 
@@ -167,7 +173,7 @@ app/src/main/java/com/fencewatcher/sonyanc/
 ├── BluetoothAncService.kt   # Foreground RFCOMM service — connection, handshake, read loop, state
 ├── SonyMdrV2.kt             # MDR v2 payloads: command/type bytes, frame builders, tables T1/T2
 ├── SonyAncProtocol.kt       # Frame encoder/decoder: SOF/EOF escaping, checksum, framing
-├── HeadphoneProfile.kt      # XM5 vs XM6 differences — UUID, payload length, handshake
+├── HeadphoneProfile.kt      # The WH-1000XM6 wire profile — UUID, payloads, handshake
 ├── MainActivity.kt          # Tab UI, device picker, EQ, settings
 ├── DebugActivity.kt         # Frame log with timestamps, T1/T2, raw send
 ├── Automation.kt            # Rules, triggers, actions

@@ -103,6 +103,12 @@ class BluetoothAncService : Service() {
     private var deviceAddress: String? = null
 
     /**
+     * The headphones' Bluetooth name as reported at connect time, used for the
+     * notification title. Falls back to the model when unknown.
+     */
+    private var deviceName: String = ""
+
+    /**
      * Consecutive connect failures, deliberately a field rather than a local.
      *
      * It used to be local to connectBluetooth, so every triggerReconnect reset it
@@ -169,34 +175,62 @@ class BluetoothAncService : Service() {
      */
     private val aclReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-            if (intent?.action != BluetoothDevice.ACTION_ACL_CONNECTED) return
             @Suppress("DEPRECATION")
-            val dev = intent.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
+            val dev = intent?.getParcelableExtra<BluetoothDevice>(BluetoothDevice.EXTRA_DEVICE) ?: return
             if (dev.address != deviceAddress) return
-            // An attempt is already running and will find the headphones on its
-            // own. Acting on the broadcast would cancel it mid-handshake, which
-            // is precisely the failure this guard exists to stop.
-            if (connectInProgress) {
-                Log.d(tag, "ACL broadcast during a live connect attempt — ignoring")
-                return
+            when (intent.action) {
+                BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    // An attempt is already running and will find the headphones on its
+                    // own. Acting on the broadcast would cancel it mid-handshake, which
+                    // is precisely the failure this guard exists to stop.
+                    if (connectInProgress) {
+                        Log.d(tag, "ACL broadcast during a live connect attempt — ignoring")
+                        return
+                    }
+                    // The link can already be up. Reconnecting now would close a
+                    // working socket because the profile happened to re-announce.
+                    if (btSocket != null && status == Status.CONNECTED) {
+                        Log.d(tag, "ACL broadcast for an already-connected link — ignoring")
+                        return
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    if (now - lastAclReconnectAt < ACL_RECONNECT_COOLDOWN_MS) {
+                        Log.d(tag, "ACL broadcast within cooldown — ignoring")
+                        return
+                    }
+                    lastAclReconnectAt = now
+                    connectFailures = 0
+                    Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
+                    triggerReconnect()
+                }
+
+                BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                    // The headphones went away at the link level. The read loop
+                    // notices the dead socket on its own and the reconnect burst
+                    // runs as before; what this adds is the *labelling*: the moment
+                    // the link drops we can say "headphones off — waiting" instead
+                    // of a generic disconnect, both in the notification and on the
+                    // Home card. Without it a powered-off pair reads as a fault
+                    // until the retry burst has spent itself.
+                    if (!isRunning) return
+                    if (btSocket != null && status == Status.CONNECTED) return  // read loop owns this transition
+                    headphonesAbsent = true
+                    if (status == Status.WAITING || status == Status.DISCONNECTED) {
+                        broadcastStatus(status, "Waiting — headphones powered off")
+                        updateNotification("Waiting — headphones powered off")
+                    }
+                }
             }
-            // The link can already be up. Reconnecting now would close a
-            // working socket because the profile happened to re-announce.
-            if (btSocket != null && status == Status.CONNECTED) {
-                Log.d(tag, "ACL broadcast for an already-connected link — ignoring")
-                return
-            }
-            val now = android.os.SystemClock.elapsedRealtime()
-            if (now - lastAclReconnectAt < ACL_RECONNECT_COOLDOWN_MS) {
-                Log.d(tag, "ACL broadcast within cooldown — ignoring")
-                return
-            }
-            lastAclReconnectAt = now
-            connectFailures = 0
-            Log.d(tag, "Headphones back at the Bluetooth profile — retrying now")
-            triggerReconnect()
         }
     }
+
+    /**
+     * Set by the ACL receiver when the headphones drop at the link level, so the
+     * wait state can be described as "powered off" rather than a connection
+     * fault. Cleared on the next successful connect.
+     */
+    @Volatile
+    private var headphonesAbsent = false
     private var batteryPercent: Int? = null
 
     /** Latch for the battery-low trigger, so it fires once per crossing. */
@@ -204,11 +238,7 @@ class BluetoothAncService : Service() {
     private var currentModeName: String = "—"
     @Volatile
     private var autoPaused = false
-    private var profile: HeadphoneProfile = HeadphoneProfile.Xm6
-
-    /** "auto" | "xm5" | "xm6" — user-pinned protocol, see EXTRA_PROFILE_OVERRIDE. */
-    @Volatile
-    private var profileOverride: String = "auto"
+    private val profile = HeadphoneProfile
 
     // ---- Lifecycle ----
 
@@ -222,7 +252,10 @@ class BluetoothAncService : Service() {
         runCatching {
             registerReceiver(
                 aclReceiver,
-                android.content.IntentFilter(BluetoothDevice.ACTION_ACL_CONNECTED),
+                android.content.IntentFilter().apply {
+                    addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+                    addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+                },
             )
         }
         Log.d(tag, "Service created")
@@ -240,7 +273,6 @@ class BluetoothAncService : Service() {
                             return START_NOT_STICKY
                         }
                     deviceAddress = address
-                    profileOverride = intent.getStringExtra(EXTRA_PROFILE_OVERRIDE) ?: "auto"
                     isRunning = true
                     powerOffRequested = false   // fresh start, not a leftover power-off
                     Log.d(tag, "Starting service, device=$address")
@@ -253,6 +285,12 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Stopping service")
                     isRunning = false
                     status = Status.DISCONNECTED
+                    // Clear the readouts along with the service. They described a
+                    // live link; after a stop they were stale data wearing a
+                    // fresh "Stopped" label.
+                    batteryPercent = null
+                    currentModeName = "—"
+                    resetLinkState()
                     broadcastStatus(status, "Stopped")
                     stopActivityAutomation()
                     try { btSocket?.close() } catch (_: Exception) {}
@@ -416,9 +454,9 @@ class BluetoothAncService : Service() {
                 ACTION_SET_CONNECTION_MODE -> {
                     val soundQuality = intent.getBooleanExtra("sound_quality", true)
                     scope.launch {
-                        sendFrame(SonyMdrV2.buildConnectionModeSet(isXm5(), soundQuality))
+                        sendFrame(SonyMdrV2.buildConnectionModeSet(soundQuality))
                         delay(150L)
-                        sendFrame(SonyMdrV2.buildConnectionModeGet(isXm5()))
+                        sendFrame(SonyMdrV2.buildConnectionModeGet())
                     }
                 }
 
@@ -480,6 +518,21 @@ class BluetoothAncService : Service() {
                     }
                 }
 
+
+                ACTION_RECONNECT_NOW -> {
+                    // "Retry now" from the Home card or the notification. Only
+                    // meaningful while the service is up but the link is not.
+                    if (!isRunning || deviceAddress == null) {
+                        Log.d(tag, "Retry-now ignored: service not running")
+                    } else if (status == Status.CONNECTED) {
+                        Log.d(tag, "Retry-now ignored: already connected")
+                    } else {
+                        Log.d(tag, "Retry now requested — restarting the connect cycle")
+                        connectFailures = 0
+                        lastAclReconnectAt = 0L
+                        triggerReconnect()
+                    }
+                }
 
                 ACTION_RELOAD_AUTOMATION -> reloadAutomation()
             }
@@ -577,7 +630,7 @@ class BluetoothAncService : Service() {
         connectionJob?.cancel()
         connectionJob = scope.launch {
 
-            while (isActive && connectFailures < MAX_RETRIES) {
+            while (isActive && isRunning && connectFailures < MAX_RETRIES) {
                 connectInProgress = true
                 try {
                     val adapter = BluetoothAdapter.getDefaultAdapter()
@@ -598,20 +651,19 @@ class BluetoothAncService : Service() {
 
                     val device: BluetoothDevice = adapter.getRemoteDevice(address)
 
-                    // Detect headphone model from device name, unless the user pinned
-                    // one. A silent fallback to XM6 is the wrong default to be stuck
-                    // with on hardware you cannot test against, so the override is
-                    // threaded through to here rather than living in the UI only.
-                    profile = when (profileOverride) {
-                        "xm5" -> HeadphoneProfile.Xm5
-                        "xm6" -> HeadphoneProfile.Xm6
-                        else -> HeadphoneProfile.detect(device.name ?: "")
+                    // XM5 hardware shares the XM6 service UUID, so a socket to it
+                    // would open and then speak the wrong protocol — the broken
+                    // connections and wrong readouts that led to XM5 support being
+                    // scrapped in v1.83. Refuse it politely instead of half-working.
+                    deviceName = HeadphoneProfile.bluetoothDisplayName(device) ?: ""
+                    if (deviceName.contains("XM5", ignoreCase = true)) {
+                        Log.w(tag, "WH-1000XM5 detected — not supported")
+                        status = Status.ERROR
+                        broadcastStatus(status, "WH-1000XM5 is not supported — this app is XM6 only")
+                        updateNotification("XM5 not supported")
+                        return@launch
                     }
-                    Log.d(
-                        tag,
-                        "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)" +
-                            if (profileOverride != "auto") " [pinned: $profileOverride]" else "",
-                    )
+                    Log.d(tag, "Profile: ${profile.modelName} (${profile.serviceUuid.take(8)}…)")
                     try {
                         btSocket?.close()
                     } catch (_: Exception) {}
@@ -622,33 +674,81 @@ class BluetoothAncService : Service() {
                     broadcastStatus(status, "Connecting…")
                     updateNotification("Connecting…")
 
-                    // Cancel discovery — required before RFCOMM on Android
+                    // Cancel discovery — required before RFCOMM on Android. And
+                    // give the stack a moment afterwards: an RFCOMM connect fired
+                    // into a just-cancelled discovery is refused on the first
+                    // try more often than not.
                     try {
                         if (adapter.isDiscovering) {
                             adapter.cancelDiscovery()
                             Log.d(tag, "Cancelled BT discovery before socket creation")
+                            delay(500L)
                         }
                     } catch (_: Exception) {}
 
-                    // Try multiple connection methods — Sony RFCOMM is finicky
-                    if (!awaitProfileReady(device)) {
+                                        // Try multiple connection methods — Sony RFCOMM is finicky.
+                    // First attempt of a burst gets the longer wait: the headphones
+                    // have often just been turned on, and the profile can take a
+                    // few seconds to settle. Later attempts already had their chance.
+                    val profileReady = awaitProfileReady(device, if (connectFailures == 0) 8_000L else 4_000L)
+                    if (!profileReady) {
                         Log.d(tag, "Profile not ready after wait — trying anyway")
                     }
-                    val socket = connectSonyRfcomm(device)
-                    // Publish only once the channel is actually up. Assigning
-                    // first left a window where a concurrent sender (the 60s
-                    // poll, an ACTION_ intent, a media-state change) could pick
-                    // up a socket that was created but not yet connected, fail
-                    // its write, and take the whole in-flight connect down with
-                    // it -- which is what a lot of "first try" failures were.
-                    socket.connect()
+                    // Rotating through every socket factory is only worth it while
+                    // there is reason to believe the headphones are actually
+                    // reachable. When the profile probe says they are not and we
+                    // already know which channel worked before, one attempt on
+                    // that channel is enough — the full rotation used to burn
+                    // half a minute paging a powered-off pair on every retry.
+                    val socket = connectSonyRfcomm(
+                        device,
+                        profileReady = profileReady,
+                        fullRotation = profileReady || lastGoodChannel == null,
+                    )
+                    // connectSonyRfcomm only returns a socket whose connect() has
+                    // already succeeded, so publishing it here cannot expose a
+                    // merely-created socket to concurrent senders (the 60s poll,
+                    // an ACTION_ intent, a media-state change).
+                    if (!isRunning) {
+                        // A stop raced this connect and the channel came up
+                        // anyway. The service is on its way out — do not announce
+                        // a connection that is about to be closed.
+                        try { socket.close() } catch (_: Exception) {}
+                        status = Status.DISCONNECTED
+                        broadcastStatus(status, "Stopped")
+                        return@launch
+                    }
                     btSocket = socket
 
                     Log.d(tag, "Connected!")
                     slowPollJob?.cancel()
                     slowPollJob = null
                     status = Status.CONNECTED
+                    headphonesAbsent = false
                     broadcastStatus(status, "Connected")
+
+                    // The Bluetooth stack refreshes the remote name when a link
+                    // comes up, but some stacks keep serving the cached name
+                    // until an SDP lookup nudges them — a rename that happened
+                    // while paired then never lands, and the Home card keeps
+                    // showing the old model name. Kick one off and re-read the
+                    // name a few times over the next half minute.
+                    runCatching { device.fetchUuidsWithSdp() }
+                    scope.launch {
+                        for (extraWaitMs in listOf(3_000L, 7_000L, 15_000L)) {
+                            delay(extraWaitMs)
+                            if (!isActive || !isRunning) return@launch
+                            val fresh = HeadphoneProfile.bluetoothDisplayName(
+                                adapter.getRemoteDevice(address),
+                            )
+                            if (!fresh.isNullOrBlank() && fresh != deviceName) {
+                                Log.d(tag, "Device name refreshed: '$deviceName' -> '$fresh'")
+                                deviceName = fresh
+                                broadcastStats()
+                                return@launch
+                            }
+                        }
+                    }
                     updateNotification("Connected")
                     currentSeq = 0       // Reset seq on every fresh connection
                     connectFailures = 0   // Reset the failure count on success
@@ -700,6 +800,12 @@ class BluetoothAncService : Service() {
                         }
                     }
 
+
+                    // A short settle after channel establishment: the first query
+                    // fired into a just-opened socket was occasionally answered
+                    // too late for even the 800ms retry window, which looked like
+                    // a dead first connect.
+                    delay(150L)
 
                     // XM6 protocol handshake — required before the headphones accept 0x19 commands
                     Log.d(tag, "Handshake: protocol info")
@@ -753,21 +859,42 @@ class BluetoothAncService : Service() {
 
                     // Socket closed — reconnect automatically
                     btSocket = null
-                    status = Status.DISCONNECTED
+                    // The link is gone; codec/LDAC, DSEE and wear described a
+                    // connection that no longer exists.
+                    resetLinkState()
+
+                    if (!isRunning) {
+                        // The user stopped the service — closing the socket is
+                        // what unblocked this loop. Without this guard the stop
+                        // raced the read loop and the card was left stuck on
+                        // "Reconnecting…" for a reconnect that would never run.
+                        status = Status.DISCONNECTED
+                        broadcastStatus(status, "Stopped")
+                        return@launch
+                    }
 
                     if (powerOffRequested) {
                         // The user turned the headphones off on purpose. Do not
-                        // treat the resulting disconnect as a fault.
+                        // treat the resulting disconnect as a fault. Keep the
+                        // service alive in the WAITING state so it can pick the
+                        // headphones up again the moment they come back.
                         Log.d(tag, "Socket closed after deliberate power-off — not reconnecting")
                         powerOffRequested = false
-                        broadcastStatus(status, "Powered off")
-                        updateNotification("Powered off")
+                        everConnected = false
+                        status = Status.WAITING
+                        currentModeName = "—"
+                        broadcastStatus(status, "Waiting — headphones powered off")
+                        updateNotification("Waiting — headphones powered off")
                         refreshNotification()
+                        startAbsentPoll(address)
                         return@launch
                     }
 
                     Log.d(tag, "Socket closed — reconnecting")
-                    broadcastStatus(status, "Disconnected")
+                    // CONNECTING rather than DISCONNECTED: a dropped link with the
+                    // service still up is work in progress, not a stopped service.
+                    status = Status.CONNECTING
+                    broadcastStatus(status, "Reconnecting…")
                     updateNotification("Disconnected, reconnecting…")
                     runAutomation(Automation.Trigger.DEVICE_DISCONNECTED)
                     triggerReconnect()
@@ -777,24 +904,57 @@ class BluetoothAncService : Service() {
                     throw e  // Propagate cancellation
                 } catch (e: Exception) {
                     Log.w(tag, "BT error: ${e.javaClass.simpleName}: ${e.message}")
-                    status = Status.DISCONNECTED
-                    broadcastStatus(status, "${e.javaClass.simpleName}: ${e.message ?: "(no message)"}")
-
                     if (!isActive) break
+                    if (!isRunning) {
+                        // Stopped mid-attempt: the socket close is what failed
+                        // this connect, and the "Stopped" broadcast already went
+                        // out with the stop. No reconnect message, no retries —
+                        // broadcasting here is what left the card stuck on
+                        // "Reconnecting…" after a stop.
+                        break
+                    }
 
                     // Cleared before the backoff, not after: the wait is exactly
                     // when the headphones are most likely to come back, and an
                     // ACL broadcast during it has to be able to shorten it.
                     connectInProgress = false
                     connectFailures++
+                    // While the burst is running the service is still working, not
+                    // dead: stay CONNECTING so the UI keeps offering Stop rather
+                    // than Start, and carry the retry plan in the message instead.
+                    status = Status.CONNECTING
                     // A pair that was reachable moments ago is present, not absent.
                     // Retry promptly for the first few attempts, then fall back to
                     // the normal backoff so a genuinely powered-off pair is not
-                    // hammered -- the loop gives up on its own after this.
-                    val delay = if (everConnected && connectFailures <= 3) 800L
-                    else RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
-                    updateNotification("Reconnecting in ${delay / 1000}s…")
-                    delay(delay)
+                    // hammered -- the loop gives up on its own after this. A first
+                    // attempt that failed also retries almost immediately: the
+                    // headphones often answer the second try, and a three-second
+                    // wait in front of it only read as "the app is slow".
+                    val delay = when {
+                        everConnected && connectFailures <= 3 -> 800L
+                        connectFailures == 1 -> 500L
+                        else -> RETRY_DELAY_MS * (1L shl (connectFailures - 1).coerceAtMost(4))
+                    }
+                    if (connectFailures < MAX_RETRIES) {
+                        // The number shown is the attempt about to run, which is
+                        // why it is connectFailures + 1 — and why this message is
+                        // skipped once the burst is spent: there is no upcoming
+                        // attempt, and announcing "attempt 6 of 5" followed by a
+                        // 48s wait that nothing survives was exactly that.
+                        // The reason rides along so "is it the headphones?" can be
+                        // answered from the card: "read failed" / "connection
+                        // refused" is the stack or the device, not a mystery.
+                        val reason = (e.message ?: e.javaClass.simpleName).take(60)
+                        broadcastStatus(
+                            status,
+                            "Reconnecting in ${delay / 1000}s (attempt ${connectFailures + 1} of $MAX_RETRIES) — $reason",
+                        )
+                        updateNotification("Reconnecting in ${delay / 1000}s…")
+                        delay(delay)
+                    }
+                    // Otherwise fall through: the loop condition ends the burst and
+                    // the give-up branch flips to WAITING immediately, with no dead
+                    // backoff in between.
                 } finally {
                     // Every other exit -- a clean give-up, an early return, a
                     // cancellation -- lands here, so the flag cannot be left
@@ -803,43 +963,64 @@ class BluetoothAncService : Service() {
                 }
             }
 
-            if (!isActive) {
-                status = Status.DISCONNECTED
-                broadcastStatus(status)
-                updateNotification("Stopped")
-            } else {
-                status = Status.DISCONNECTED
-                // Not a fault: most often the headphones are simply powered off.
-                // Waiting for the Bluetooth profile to report them back beats
-                // hammering the stack every few seconds.
-                // The retry budget is spent, so the next round starts from the
-                // absent-device pacing rather than the dropped-link pacing.
-                everConnected = false
-                broadcastStatus(status, "Headphones off — waiting")
-                updateNotification("Headphones off — waiting")
-
-                // Keep a slow heartbeat rather than stopping dead. One attempt a
-                // minute is not "constantly reconnecting", and it covers the
-                // case the ACL receiver cannot: the headphones already being
-                // on and ACL-up, so no further broadcast is coming. Without
-                // this the app needs a manual Start to recover.
-                slowPollJob?.cancel()
-                slowPollJob = scope.launch {
-                    while (isActive && btSocket == null) {
-                        delay(ABSENT_RETRY_MS)
-                        if (!isActive || btSocket != null) break
-                        // A burst may already be running from an earlier round.
-                        // connectBluetooth cancels the live job before starting
-                        // a new one, so reconnecting here would truncate that
-                        // burst and restart its backoff from zero -- turning a
-                        // slow recovery into exactly the loop this is meant to
-                        // prevent. Skip the round and look again next minute.
-                        if (connectionJob?.isActive == true) continue
-                        Log.d(tag, "Still nothing after the burst — slow retry")
-                        connectFailures = 0
-                        connectBluetooth(address)
-                    }
+            when {
+                !isActive -> {
+                    status = Status.DISCONNECTED
+                    broadcastStatus(status)
+                    updateNotification("Stopped")
                 }
+                !isRunning -> {
+                    // The burst outlived the service (stop mid-retry). The
+                    // WAITING state and the slow poll belong to a running
+                    // service; a stopped one goes quiet with the stop it
+                    // already announced.
+                    status = Status.DISCONNECTED
+                    broadcastStatus(status, "Stopped")
+                }
+                else -> {
+                    status = Status.WAITING
+                    // Not a fault: most often the headphones are simply powered off.
+                    // WAITING says "the service is up and will pick them up" — which
+                    // is what the button used to contradict by flipping back to Start.
+                    everConnected = false
+                    // The ANC mode described a live link; without one it is stale.
+                    currentModeName = "—"
+                    broadcastStatus(status, "Waiting for headphones")
+                    updateNotification("Waiting for headphones")
+                    startAbsentPoll(address)
+                }
+            }
+        }
+    }
+
+    /**
+     * The once-a-minute poll that runs after the fast retry burst is spent.
+     *
+     * Exists to prevent a stranded app. ACTION_ACL_CONNECTED fires when the
+     * link comes up, which may be *before* the app starts retrying -- so an
+     * app that gives up while the headphones are already on and ACL-up would
+     * sit there waiting for a broadcast that has already been and gone.
+     *
+     * Runs on the scope rather than as a child of the finished connect job, so
+     * it survives that job's cancellation and keeps covering both exits that
+     * land in the wait state: a spent burst and a deliberate power-off.
+     */
+    private fun startAbsentPoll(address: String) {
+        slowPollJob?.cancel()
+        slowPollJob = scope.launch {
+            while (isActive && isRunning && btSocket == null) {
+                delay(ABSENT_RETRY_MS)
+                if (!isActive || btSocket != null) break
+                // A burst may already be running from an earlier round.
+                // connectBluetooth cancels the live job before starting
+                // a new one, so reconnecting here would truncate that
+                // burst and restart its backoff from zero -- turning a
+                // slow recovery into exactly the loop this is meant to
+                // prevent. Skip the round and look again next minute.
+                if (connectionJob?.isActive == true) continue
+                Log.d(tag, "Still nothing after the burst — slow retry")
+                connectFailures = 0
+                connectBluetooth(address)
             }
         }
     }
@@ -852,9 +1033,18 @@ class BluetoothAncService : Service() {
         val cmd = p[0].toInt() and 0xFF
         when (cmd) {
             0x23, 0x25 -> {  // battery RET / NTFY (single battery)
-                if (p.size >= 3) {
-                    batteryPercent = p[2].toInt() and 0xFF
+                // Shape gate: a status frame is four bytes — cmd, seq, level,
+                // charging flag. The peripheral table reuses 0x25 for its own
+                // short notifications, and "25 02 01" arriving there was read
+                // at the level offset as a 1% battery: a phantom 1% on the
+                // card, a bad history sample, and a spurious low-battery rule.
+                // A charging flag outside 0..2 is not a battery reading either.
+                val level = if (p.size >= 4) p[2].toInt() and 0xFF else -1
+                val charging = if (p.size >= 4) p[3].toInt() and 0xFF else -1
+                if (level in 1..100 && charging in 0..2) {
+                    batteryPercent = level
                     Log.d(tag, "Battery: $batteryPercent%")
+                    deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR, currentContext()) }
                     refreshNotification()
                     // Fire only on the crossing, not on every 60s poll — otherwise a
                     // rule bound to "battery low" would re-run every minute.
@@ -865,6 +1055,8 @@ class BluetoothAncService : Service() {
                     } else if (!low) {
                         batteryLowFired = false
                     }
+                } else {
+                    Log.w(tag, "Not a battery frame, ignored — ${SonyMdrV2.hex(p)}")
                 }
             }
             0x67, 0x69 -> {  // NCASM RET / NTFY — mode may have changed on-device
@@ -891,6 +1083,7 @@ class BluetoothAncService : Service() {
             0x57, 0x59 -> {  // EQ RET / NTFY: pid, subtype, presetID, count, values…
                 val presetId = if (p.size >= 3) p[2].toInt() and 0xFF else 0
                 val bandCount = if (p.size >= 4) p[3].toInt() and 0xFF else 0
+                eqStateKnown = true
                 eqActivePreset = presetId
                 if (bandCount > 0 && p.size >= 4 + bandCount) {
                     val bands = p.copyOfRange(4, 4 + bandCount)
@@ -1076,12 +1269,9 @@ class BluetoothAncService : Service() {
                         Log.d(tag, "BGM mode: $bgmMode")
                     }
                     SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM6,
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_NOTIFY,
-                    SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5 -> {
-                        // XM6 carries the PriorMode byte at index 2; XM5 inserts a
-                        // setting-type byte first, so it lands at index 3.
-                        val idx = if (subtype == SonyMdrV2.AUDIO_TYPE_CONNECTION_MODE_XM5) 3 else 2
-                        val prior = SonyMdrV2.decodePriorMode(p, idx)
+                    SonyMdrV2.AUDIO_TYPE_CONNECTION_NOTIFY -> {
+                        // XM6 carries the PriorMode byte at index 2.
+                        val prior = SonyMdrV2.decodePriorMode(p, 2)
                         if (prior != null) {
                             connectionSoundQuality = prior
                             Log.d(tag, "Connection mode: sound quality = $prior")
@@ -1253,7 +1443,7 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildUpscalingGet())
         request(SonyMdrV2.buildBgmGet())
         request(SonyMdrV2.buildUpmixGet())
-        request(SonyMdrV2.buildConnectionModeGet(isXm5()))
+        request(SonyMdrV2.buildConnectionModeGet())
         // Asked here as well as on the 60s timer: without it the codec stays
         // unknown until a playback transition or a minute elapses, so the badge
         // reads empty on a freshly connected app.
@@ -1299,26 +1489,95 @@ class BluetoothAncService : Service() {
      * is used whenever it yields a socket at all. Reflection channels are tried
      * only when no UUID produces one, which is the case they actually exist for.
      */
-    private fun connectSonyRfcomm(device: BluetoothDevice): BluetoothSocket {
+    /**
+     * Factory for the channel that last produced a working link, so reconnects
+     * try it first instead of re-walking the whole factory list. Cleared when
+     * the service restarts; closures capture the same device address throughout
+     * one service life, which is all this single-device app needs.
+     */
+    private var lastGoodChannel: (() -> BluetoothSocket)? = null
+
+    /**
+     * Build socket candidates in preference order and drive each through
+     * [BluetoothSocket.connect], returning the first one that actually
+     * establishes a channel.
+     *
+     * Creating a socket proves nothing — neither that the channel exists nor
+     * that it is the MDR service — so "known-good" is recorded only after a
+     * connect succeeds, not when a factory merely produces an object.
+     */
+    private suspend fun connectSonyRfcomm(
+        device: BluetoothDevice,
+        profileReady: Boolean,
+        fullRotation: Boolean,
+    ): BluetoothSocket {
         val failures = mutableListOf<String>()
+
+        suspend fun drive(label: String, create: () -> BluetoothSocket): BluetoothSocket? {
+            val socket = try {
+                create()
+            } catch (e: Exception) {
+                failures += "create $label: ${e.message}"
+                return null
+            }
+            Log.d(tag, "Using socket from $label")
+            try {
+                socket.connect()
+                return socket
+            } catch (e: IOException) {
+                failures += "connect $label: ${e.message}"
+                try { socket.close() } catch (_: Exception) {}
+                return null
+            }
+        }
+
+        // The channel that produced the last working link goes first, so a
+        // reconnect does not re-probe every factory.
+        lastGoodChannel?.let { create ->
+            var socket = drive("last known-good channel", create)
+            if (socket == null && profileReady) {
+                // The stack occasionally refuses the first channel open right
+                // after a link state change, then accepts the identical attempt
+                // a moment later — the "first try fails, second works" pattern.
+                // Retry it once inside this attempt, before the slower backoff
+                // path gets a say. Gated on the profile probe so a powered-off
+                // pair is not paged twice per round.
+                Log.d(tag, "First open refused on the known-good channel — retrying once")
+                delay(600L)
+                socket = drive("last known-good channel (retry)", create)
+            }
+            if (socket != null) {
+                lastGoodChannel = create
+                return socket
+            }
+        }
+
+        if (!fullRotation) {
+            // The profile probe says the headphones are not reachable and we
+            // know which channel worked before. One attempt on it is enough —
+            // walking every factory against a powered-off pair cost half a
+            // minute per retry and never succeeded.
+            throw IOException("Headphones unreachable — profile not connected (${failures.joinToString("; ")})")
+        }
 
         for (uuidStr in HeadphoneProfile.allUuids) {
             val uuid = UUID.fromString(uuidStr)
             for (secure in listOf(true, false)) {
                 val label = (if (secure) "" else "insecure ") + uuidStr
-                try {
-                    val socket = if (secure) device.createRfcommSocketToServiceRecord(uuid)
+                val create: () -> BluetoothSocket = {
+                    if (secure) device.createRfcommSocketToServiceRecord(uuid)
                     else device.createInsecureRfcommSocketToServiceRecord(uuid)
-                    Log.d(tag, "Using socket from $label")
+                }
+                val socket = drive(label, create)
+                if (socket != null) {
+                    lastGoodChannel = create
                     return socket
-                } catch (e: IOException) {
-                    failures += "create $label: ${e.message}"
                 }
             }
         }
 
-        // No UUID produced a socket. Only now is trying channels safe, because
-        // there is nothing known-good left to prefer.
+        // No UUID produced a connected channel. Only now is trying channels
+        // safe, because there is nothing known-good left to prefer.
         val channels = intArrayOf(1, 10, 2, 3, 5, 15, 20)
         val createCh = try {
             device.javaClass.getMethod("createRfcommSocket", Int::class.java)
@@ -1326,16 +1585,15 @@ class BluetoothAncService : Service() {
             throw IOException("No RFCOMM strategy available: ${e.message}", e)
         }
         for (ch in channels) {
-            try {
-                val socket = createCh.invoke(device, ch) as BluetoothSocket
-                Log.d(tag, "Using socket from reflection channel $ch")
+            val create: () -> BluetoothSocket = { createCh.invoke(device, ch) as BluetoothSocket }
+            val socket = drive("reflection channel $ch", create)
+            if (socket != null) {
+                lastGoodChannel = create
                 return socket
-            } catch (e: Exception) {
-                failures += "create channel $ch: ${e.message}"
             }
         }
 
-        throw IOException("No RFCOMM socket could be created — ${failures.joinToString("; ")}")
+        throw IOException("No RFCOMM channel accepted a connection — ${failures.joinToString("; ")}")
     }
 
     /**
@@ -1442,81 +1700,87 @@ class BluetoothAncService : Service() {
             return
         }
         val rules = automationRules
-        val rule = Automation.resolve(rules, trigger)
+        val rule = Automation.firstMatch(
+            rules,
+            trigger,
+            Automation.State(worn = headphonesWorn, batteryPercent = batteryPercent),
+        )
         if (rule == null) {
             Log.d(tag, "Automation: no rule for ${trigger.id} — leaving state alone")
             return
         }
         Log.d(tag, "Automation: ${trigger.id} → ${Automation.describe(rule)}")
-        when (rule.action.type) {
-            Automation.ActionType.NONE -> Unit
-            Automation.ActionType.SET_MODE -> when (rule.action.mode) {
-                Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
-                Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
-                Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
-            }
-            Automation.ActionType.SET_AMBIENT_LEVEL -> {
-                // Was `profile.ancOn(rule.action.value)`, which builds
-                // [0x68,0x19,0x01,0x01,0x00,...] — byte 4 = 0x00, i.e. the NC
-                // payload. "Set ambient level" therefore switched noise cancelling
-                // ON instead of changing the ambient level. Use the same builder the
-                // UI uses, with the rule's level overriding the stored one.
-                val saved = ambientLevel()
-                val cmd = profile.ambient(
-                    level = rule.action.value,
-                    voice = voicePassthrough(),
-                    noiseAdaptive = autoAmbient(),
-                )
-                sendFrame(cmd)
-                if (rule.action.value != saved) {
-                    // Persist so the UI slider reflects what the routine just set.
-                    val addr = deviceAddress
-                    if (addr != null)
-                        prefs().edit().putInt("ambient_level_$addr", rule.action.value).apply()
+        for (action in rule.actions) {
+            when (action.type) {
+                Automation.ActionType.NONE -> Unit
+                Automation.ActionType.SET_MODE -> when (action.mode) {
+                    Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
+                    Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
+                    Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
                 }
-            }
-            Automation.ActionType.SET_VOLUME -> {
-                // Media volume had no working path on this hardware and was judged
-                // useless, so it was removed rather than left half-wired.
-                Log.d(tag, "Automation: SET_VOLUME no longer supported — ignoring")
-            }
-            Automation.ActionType.SET_EQ_PRESET -> {
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), rule.action.presetId.toByte(), 0x00))
-                delay(120L)
-                sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
-            }
-            // The remaining headphone features. Each reuses the exact builder the
-            // Audio tab uses, so a routine and a manual toggle cannot drift apart.
-            Automation.ActionType.SET_SPEAK_TO_CHAT ->
-                sendFrame(SonyMdrV2.buildSpeakToChatSet(rule.action.value != 0))
-            Automation.ActionType.SET_PAUSE_TAKEN_OFF ->
-                sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(rule.action.value != 0))
-            Automation.ActionType.SET_DSEE ->
-                sendFrame(SonyMdrV2.buildUpscalingSet(rule.action.value != 0))
-            Automation.ActionType.SET_BGM ->
-                sendFrame(SonyMdrV2.buildBgmSet(rule.action.value != 0))
-            Automation.ActionType.SET_UPMIX ->
-                sendFrame(SonyMdrV2.buildUpmixSet(rule.action.value != 0))
-            // These two live in the ambient payload rather than a command of their
-            // own, so the stored pref is flipped and the ambient frame re-sent —
-            // same path as applyAmbientNow(), just driven by a rule.
-            Automation.ActionType.SET_VOICE_PASSTHROUGH -> {
-                setAmbientFlag("voice_passthrough", rule.action.value != 0)
-                sendFrame(sonyAmbientCommand())
-            }
-            Automation.ActionType.SET_AUTO_AMBIENT -> {
-                setAmbientFlag("auto_ambient", rule.action.value != 0)
-                sendFrame(sonyAmbientCommand())
-            }
-            Automation.ActionType.SET_AUTO_POWER -> {
-                val mode = if (rule.action.power == Automation.AutoPower.NEVER)
-                    SonyMdrV2.AutoPowerOff.NEVER else SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF
-                sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode))
-            }
-            Automation.ActionType.SET_VOICE_GUIDANCE -> {
-                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(rule.action.value), SonyMdrV2.Table.T2)
-                delay(120L)
-                sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+                Automation.ActionType.SET_AMBIENT_LEVEL -> {
+                    // Was `profile.ancOn(action.value)`, which builds
+                    // [0x68,0x19,0x01,0x01,0x00,...] — byte 4 = 0x00, i.e. the NC
+                    // payload. "Set ambient level" therefore switched noise cancelling
+                    // ON instead of changing the ambient level. Use the same builder the
+                    // UI uses, with the rule's level overriding the stored one.
+                    val saved = ambientLevel()
+                    val cmd = profile.ambient(
+                        level = action.value,
+                        voice = voicePassthrough(),
+                        noiseAdaptive = autoAmbient(),
+                    )
+                    sendFrame(cmd)
+                    if (action.value != saved) {
+                        // Persist so the UI slider reflects what the routine just set.
+                        val addr = deviceAddress
+                        if (addr != null)
+                            prefs().edit().putInt("ambient_level_$addr", action.value).apply()
+                    }
+                }
+                Automation.ActionType.SET_VOLUME -> {
+                    // Media volume had no working path on this hardware and was judged
+                    // useless, so it was removed rather than left half-wired.
+                    Log.d(tag, "Automation: SET_VOLUME no longer supported — ignoring")
+                }
+                Automation.ActionType.SET_EQ_PRESET -> {
+                    sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_SET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte(), action.presetId.toByte(), 0x00))
+                    delay(120L)
+                    sendFrame(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
+                }
+                // The remaining headphone features. Each reuses the exact builder the
+                // Audio tab uses, so a routine and a manual toggle cannot drift apart.
+                Automation.ActionType.SET_SPEAK_TO_CHAT ->
+                    sendFrame(SonyMdrV2.buildSpeakToChatSet(action.value != 0))
+                Automation.ActionType.SET_PAUSE_TAKEN_OFF ->
+                    sendFrame(SonyMdrV2.buildPauseWhenTakenOffSet(action.value != 0))
+                Automation.ActionType.SET_DSEE ->
+                    sendFrame(SonyMdrV2.buildUpscalingSet(action.value != 0))
+                Automation.ActionType.SET_BGM ->
+                    sendFrame(SonyMdrV2.buildBgmSet(action.value != 0))
+                Automation.ActionType.SET_UPMIX ->
+                    sendFrame(SonyMdrV2.buildUpmixSet(action.value != 0))
+                // These two live in the ambient payload rather than a command of their
+                // own, so the stored pref is flipped and the ambient frame re-sent —
+                // same path as applyAmbientNow(), just driven by a rule.
+                Automation.ActionType.SET_VOICE_PASSTHROUGH -> {
+                    setAmbientFlag("voice_passthrough", action.value != 0)
+                    sendFrame(sonyAmbientCommand())
+                }
+                Automation.ActionType.SET_AUTO_AMBIENT -> {
+                    setAmbientFlag("auto_ambient", action.value != 0)
+                    sendFrame(sonyAmbientCommand())
+                }
+                Automation.ActionType.SET_AUTO_POWER -> {
+                    val mode = if (action.power == Automation.AutoPower.NEVER)
+                        SonyMdrV2.AutoPowerOff.NEVER else SonyMdrV2.AutoPowerOff.WHEN_TAKEN_OFF
+                    sendFrame(SonyMdrV2.buildAutoPowerOffSet(mode))
+                }
+                Automation.ActionType.SET_VOICE_GUIDANCE -> {
+                    sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeSet(action.value), SonyMdrV2.Table.T2)
+                    delay(120L)
+                    sendFrame(SonyMdrV2.buildVoiceGuidanceVolumeGet(), SonyMdrV2.Table.T2)
+                }
             }
         }
         refreshNotification()
@@ -1786,6 +2050,10 @@ class BluetoothAncService : Service() {
     private data class MdrFrame(val dataType: Int, val sequence: Int, val payload: ByteArray)
 
     private fun triggerReconnect() {
+        // A stop closes the socket, which fires reconnect requests from the
+        // read-loop teardown and failed writes. Guard here so a stopped service
+        // cannot schedule a connect cycle it will never want.
+        if (!isRunning) return
         val addr = deviceAddress ?: return
         // First close old socket to unblock the read() loop
         try {
@@ -1866,10 +2134,11 @@ class BluetoothAncService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            // The shade already shows "Sony ANC Auto" above this, so the model name
-            // is more useful here than repeating the app name.
-            .setContentTitle(profile.modelName)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            // The shade already shows "Sony ANC Auto" above this. The user's own
+            // Bluetooth name for the headphones beats the model — the app speaks
+            // XM6 and nothing else, so the model alone says little.
+            .setContentTitle(deviceName.takeIf { it.isNotBlank() } ?: profile.modelName)
             .setContentText(primary)
             .apply { if (meta.isNotEmpty()) setSubText(meta) }
             .setStyle(NotificationCompat.BigTextStyle().bigText(expanded))
@@ -1879,6 +2148,23 @@ class BluetoothAncService : Service() {
             // Foreground service notification: it refreshes on every battery tick and
             // mode change, and must not buzz each time.
             .setSilent(true)
+
+        // While the service is alive but the headphones are away, offer a direct
+        // nudge out of the shade. WAITING is a state the user previously could
+        // only act on by opening the app and pressing Start.
+        if (status == Status.WAITING) {
+            builder.addAction(
+                R.drawable.ic_refresh,
+                "Retry now",
+                PendingIntent.getService(
+                    this, 3,
+                    Intent(this, BluetoothAncService::class.java).apply { action = ACTION_RECONNECT_NOW },
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+        }
+
+        return builder
             .addAction(
                 if (paused) R.drawable.ic_play else R.drawable.ic_pause,
                 if (paused) "Resume" else "Pause",
@@ -1893,6 +2179,8 @@ class BluetoothAncService : Service() {
     private fun defaultStatusLine(): String = when (status) {
         Status.CONNECTED -> if (isMediaPlaying) "Playing" else "Idle"
         Status.CONNECTING -> "Connecting…"
+        // Alive but the headphones are away. It is not a fault and not a stop.
+        Status.WAITING -> "Waiting for headphones"
         Status.DISCONNECTED -> "Disconnected"
         Status.ERROR -> "Error"
     }
@@ -1913,17 +2201,32 @@ class BluetoothAncService : Service() {
 
     // ---- Status broadcasting ----
 
-    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
+    enum class Status { DISCONNECTED, CONNECTING, CONNECTED, WAITING, ERROR }
 
     @Volatile
     var status: Status = Status.DISCONNECTED
         private set
+
+    /**
+     * Last human-readable status line sent with a status broadcast. Re-sent by
+     * broadcastStats so a battery tick or mode change cannot blank the Home
+     * card's detail line back to a bare status label.
+     */
+    @Volatile
+    private var lastStatusMessage: String? = null
 
     // Tracked EQ state (from incoming 0x57/0x59 frames)
     var eqActivePreset: Int = 0
         private set
     var eqActiveBands: IntArray? = null
         private set
+
+    /**
+     * True once the headset has actually reported EQ state. Until then the
+     * zero default would be broadcast as a confident "Off (Flat)" that nobody
+     * on the device had selected.
+     */
+    private var eqStateKnown = false
 
     // Multipoint device list from PERIPHERAL NTFY
     var connectedDevices: List<MultipointDevice> = emptyList()
@@ -1998,6 +2301,20 @@ class BluetoothAncService : Service() {
     var upscalingEffect: Int? = null
         private set
 
+    /**
+     * Clear the readouts that describe the live link — codec/LDAC, DSEE, wear —
+     * so a disconnected card shows unknown instead of the last connection's
+     * state. Battery keeps its last reading while waiting (it drains slowly and
+     * is genuinely useful there); the mode is cleared separately.
+     */
+    private fun resetLinkState() {
+        activeCodec = null
+        ldacActive = null
+        dseeExtreme = false
+        wearStatusCode = null
+        headphonesWorn = null
+    }
+
     private fun applyWearCode(code: Int) {
         val changed = code != wearStatusCode
         wearStatusCode = code
@@ -2022,9 +2339,6 @@ class BluetoothAncService : Service() {
     /** Last raw SENSE frame seen, for the Home debug line. */
     var senseDebug: String = "no SENSE frame yet"
         private set
-
-    /** True when the connected model uses the V1 (XM5) wire format. */
-    private fun isXm5(): Boolean = profile == HeadphoneProfile.Xm5
 
     /** True = "Fix Playback": multipoint will not hand the audio over. */
 
@@ -2054,13 +2368,46 @@ class BluetoothAncService : Service() {
     var voiceGuidanceVolume: Int = -1
         private set
 
+    /** "≈ 4h 12m" / "≈ 5h" / "--" — computed from the persisted battery history,
+     *  preferring samples taken under the same context (mode/worn/playing). */
+    private fun batteryEstimateText(): String =
+        deviceAddress?.let { addr ->
+            BatteryHistory.estimate(addr, currentContext())?.let { BatteryHistory.format(it) }
+        } ?: "--"
+
+    /**
+     * Compact context marker recorded with each battery sample and matched by
+     * the estimator: bit0 = media playing, bit1 = worn, bits 2-3 = NC mode
+     * (0 unknown, 1 NC, 2 ambient, 3 off). Drain differs roughly 2x between
+     * the extremes, so matching the context is the biggest accuracy lever.
+     */
+    private fun currentContext(): Int {
+        val modeBits = when {
+            currentModeName.startsWith("NC", ignoreCase = true) -> 1
+            currentModeName.startsWith("Ambient", ignoreCase = true) -> 2
+            currentModeName.startsWith("Off", ignoreCase = true) -> 3
+            else -> 0
+        }
+        return (if (isMediaPlaying) 1 else 0) or
+            (if (headphonesWorn == true) 2 else 0) or
+            (modeBits shl 2)
+    }
+
     private fun broadcastStatus(s: Status, message: String? = null) {
+        lastStatusMessage = message
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, s.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (message != null) putExtra(EXTRA_MESSAGE, message)
+            // The service's own liveness, separate from the link state. WAITING
+            // means "service up, headphones away" — the UI previously derived
+            // "not running" from exactly this state and offered Start on a
+            // service that was in fact alive.
+            putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
+            putExtra(EXTRA_BATTERY_ESTIMATE, batteryEstimateText())
             `package` = packageName
         }
         try {
@@ -2073,15 +2420,26 @@ class BluetoothAncService : Service() {
         val intent = Intent(STATUS_BROADCAST).apply {
             putExtra(EXTRA_STATUS, status.name)
             putExtra(EXTRA_DEVICE, deviceAddress)
+            // Keep the card's detail line alive across stats-only refreshes.
+            lastStatusMessage?.let { putExtra(EXTRA_MESSAGE, it) }
+            putExtra(EXTRA_SERVICE_RUNNING, isRunning)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
-            putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
-            eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
+            if (deviceName.isNotBlank()) putExtra(EXTRA_DEVICE_NAME, deviceName)
+            putExtra(EXTRA_BATTERY_ESTIMATE, batteryEstimateText())
+            // Only once the headset has actually reported EQ state — before
+            // that, the zero default read as a confident "Off (Flat)" that
+            // nobody on the device had selected.
+            if (eqStateKnown) {
+                putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
+                eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
+            }
             if (connectedDevices.isNotEmpty()) {
                 putExtra(EXTRA_DEVICE_LIST, connectedDevices.map { it.name }.toTypedArray())
                 putExtra(EXTRA_DEVICE_MACS, connectedDevices.map { it.mac }.toTypedArray())
                 putExtra(EXTRA_MULTI_STATUS, multiStatus)
                 putExtra(EXTRA_DEVICE_ACTIVE, connectedDevices.map { it.isActive }.toBooleanArray())
+                putExtra(EXTRA_DEVICE_CONNECTED, connectedDevices.map { it.isConnected }.toBooleanArray())
             }
             putExtra(EXTRA_PERIPHERAL_OK, peripheralSupported)
             putExtra(EXTRA_AUTO_POWER_MODE, autoPowerOffMode)
@@ -2219,20 +2577,20 @@ class BluetoothAncService : Service() {
          */
         const val ACTION_SYNC_STATE = "$PACKAGE.action.SYNC_STATE"
 
+        /** "Retry now" — user-initiated immediate reconnect while WAITING. */
+        const val ACTION_RECONNECT_NOW = "$PACKAGE.action.RECONNECT_NOW"
+
         /** Minimum gap between frame-log broadcasts to the debug menu. */
         const val FRAME_LOG_PUSH_INTERVAL_MS = 250L
 
         // Intent extras
         const val EXTRA_ADDRESS = "device_address"
-
-        /**
-         * "auto" (default), "xm5" or "xm6". Lets the user pin a protocol when the
-         * device name is unhelpful or the fallback guess is wrong.
-         */
-        const val EXTRA_PROFILE_OVERRIDE = "profile_override"
         const val EXTRA_STATUS = "status"
         const val EXTRA_DEVICE = "device"
         const val EXTRA_MESSAGE = "message"
+
+        /** Broadcast extra: the service's own liveness, independent of the link state. */
+        const val EXTRA_SERVICE_RUNNING = "service_running"
         const val EXTRA_EQ_PRESET = "eq_preset"
         const val EXTRA_EQ_BANDS = "eq_bands"
         const val EXTRA_EQ_ACTIVE_PRESET = "eq_active_preset"
@@ -2241,6 +2599,11 @@ class BluetoothAncService : Service() {
         const val EXTRA_MULTI_STATUS = "multi_status"
         const val EXTRA_DEVICE_MACS = "device_macs"
         const val EXTRA_DEVICE_ACTIVE = "device_active"
+        const val EXTRA_DEVICE_CONNECTED = "device_connected"
+        const val EXTRA_DEVICE_NAME = "device_name"
+
+        /** Formatted time-to-empty estimate, or "--" when none can be provided. */
+        const val EXTRA_BATTERY_ESTIMATE = "battery_estimate"
         const val EXTRA_AUTO_POWER_MODE = "auto_power_mode"
 
         // Status broadcast

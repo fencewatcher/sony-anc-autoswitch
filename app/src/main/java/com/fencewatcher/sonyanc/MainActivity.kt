@@ -23,15 +23,16 @@ import androidx.core.content.ContextCompat
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.STATUS_BROADCAST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_ADDRESS
-import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PROFILE_OVERRIDE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY_ESTIMATE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_BANDS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_START
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_STOP
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_GET_STATUS
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_RECONNECT_NOW
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_ANC_ON
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_AMBIENT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_APPLY_AMBIENT
@@ -46,6 +47,8 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_LIST
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_MACS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MULTI_STATUS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_ACTIVE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_CONNECTED
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DEVICE_NAME
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_SPEAK_TO_CHAT
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PAUSE_TAKEN_OFF
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_DSEE
@@ -106,6 +109,16 @@ class MainActivity : AppCompatActivity() {
     private var selectedEQProfile = 0xA0 // 0xA0=Custom, 0xA1=User1, 0xA2=User2
     private var eqActivePreset = 0
     private var eqActiveBands: IntArray? = null
+
+    // Pending EQ write: holds the status label on what is being applied until
+    // the headset confirms it (matching preset, and matching bands for a
+    // custom write) or the window expires. Without the hold, every unrelated
+    // stats broadcast re-rendered the *old* preset in between and the label
+    // appeared to jump back and forth.
+    private var eqPendingId: Int? = null
+    private var eqPendingBands: IntArray? = null
+    private var eqPendingAt = 0L
+    private val eqPendingTimeoutMs = 5_000L
 
     // Headphone feature state (mirrored from the service broadcasts)
     private var peripheralSupported = false
@@ -229,6 +242,11 @@ class MainActivity : AppCompatActivity() {
     private var multiNames: Array<String> = emptyArray()
     private var multiMacs: Array<String> = emptyArray()
     private var multiActive: BooleanArray = BooleanArray(0)
+    private var multiConnected: BooleanArray = BooleanArray(0)
+
+    /** The service's live view of the connected device's Bluetooth name; fresher
+     *  than the bonded cache, which only updates when the headphones reconnect. */
+    private var serviceName: String? = null
 
     /** Guards switch/spinner listeners while we push service state into the UI. */
     private var updatingUi = false
@@ -255,33 +273,62 @@ class MainActivity : AppCompatActivity() {
                 val s = BluetoothAncService.Status.valueOf(status)
                 val msg = intent.getStringExtra(EXTRA_MESSAGE)
                 updateStatusDisplay(s, msg)
-                updateServiceRunning(s == BluetoothAncService.Status.CONNECTING || s == BluetoothAncService.Status.CONNECTED)
+                // The service now reports its own liveness. This matters for
+                // WAITING — service up, headphones away — which previously fell
+                // through to "not running" here and made the Home button offer
+                // Start on a service that was in fact alive and waiting.
+                updateServiceRunning(
+                    if (intent.hasExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING))
+                        intent.getBooleanExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING, false)
+                    else s != BluetoothAncService.Status.DISCONNECTED && s != BluetoothAncService.Status.ERROR
+                )
+                updateRetryVisibility(s)
+                // When the service reports it is not running, its readouts are
+                // stale by definition — clear them instead of showing leftovers.
+                // A stopped service also stops sending battery extras, so this is
+                // the only place the old value would ever be dropped.
+                if (intent.hasExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING) &&
+                    !intent.getBooleanExtra(BluetoothAncService.EXTRA_SERVICE_RUNNING, false)
+                ) {
+                    battery = null
+                    currentMode = "—"
+                    // The live name belonged to the (now stopped) connection;
+                    // fall back to the bonded cache again.
+                    serviceName = null
+                }
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
+                // Computed service-side from the battery history. "--" means no
+                // credible estimate (too little data, charging, or stale);
+                // always set so a cleared estimate cannot linger.
+                binding.textBatteryEstimate.text = intent.getStringExtra(EXTRA_BATTERY_ESTIMATE) ?: "--"
                 updateCardStats()
+                if (!serviceRunning) updateHeroTitle()
+                // Link-derived readouts die with the link: codec/LDAC, DSEE and
+                // the wear glyph describe a live connection only. Without this
+                // they lingered across disconnects, since the service stops
+                // sending their extras and nothing else ever cleared them.
+                if (s != BluetoothAncService.Status.CONNECTED) {
+                    activeCodec = null
+                    ldacActive = null
+                    dseeExtreme = false
+                    headphonesWorn = null
+                    markRenderDirty()
+                }
             }
-            // EQ state from service
+            // EQ state from service. Everything the display needs — editability,
+            // curve sync, pending-write resolution — lives in updateEQStatus.
             if (intent?.hasExtra(EXTRA_EQ_ACTIVE_PRESET) == true) {
                 eqActivePreset = intent.getIntExtra(EXTRA_EQ_ACTIVE_PRESET, 0)
                 eqActiveBands = intent.getIntArrayExtra(EXTRA_EQ_ACTIVE_BANDS)
                 updateEQStatus()
-                // Gate editing on the preset the headset actually has selected.
-                // The graph view defaults to interactive and nothing called
-                // selectPreset() at startup, so on a cold launch the curve could be
-                // dragged even when the live preset was one of Sony's fixed ones,
-                // and dragging a preset that cannot be written is a no-op the user
-                // cannot see the reason for.
-                val editable = EQPreset.isEditable(eqActivePreset)
-                binding.eqGraph.interactive = editable
-                binding.btnApplyCustomEQ.visibility =
-                    if (editable) View.VISIBLE else View.GONE
-                if (editable) {
-                    val src = eqActiveBands
-                    if (src != null && src.size == 10) {
-                        for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
-                        binding.eqGraph.bandValues = eqBandValues
-                    }
-                }
+            }
+
+            // The service's live view of the connected device's Bluetooth name —
+            // fresher than the bonded cache, which only updates on a reconnect.
+            if (intent?.hasExtra(EXTRA_DEVICE_NAME) == true) {
+                serviceName = intent.getStringExtra(EXTRA_DEVICE_NAME)
+                updateHeroTitle()
             }
 
             // Codec and wear ride on their own broadcasts, unrelated to the
@@ -323,6 +370,7 @@ class MainActivity : AppCompatActivity() {
                     multiNames = intent.getStringArrayExtra(EXTRA_DEVICE_LIST) ?: emptyArray()
                     multiMacs = intent.getStringArrayExtra(EXTRA_DEVICE_MACS) ?: emptyArray()
                     multiActive = intent.getBooleanArrayExtra(EXTRA_DEVICE_ACTIVE) ?: BooleanArray(0)
+                    multiConnected = intent.getBooleanArrayExtra(EXTRA_DEVICE_CONNECTED) ?: BooleanArray(0)
                 }
                 speakToChat = intent.getBooleanExtra(EXTRA_SPEAK_TO_CHAT, false)
                 pauseWhenTakenOff = intent.getBooleanExtra(EXTRA_PAUSE_TAKEN_OFF, false)
@@ -418,6 +466,40 @@ class MainActivity : AppCompatActivity() {
 
         // Dashboard
         binding.btnToggle.setOnClickListener { onToggleClicked() }
+        // The graph lives one tap behind the battery card: Home keeps the single
+        // number, and the multi-day view is there when you actually ask for it.
+        binding.cardBattery.setOnClickListener {
+            val addr = selectedAddress
+            if (addr == null) {
+                toast("Connect the headphones first")
+            } else {
+                startActivity(
+                    Intent(this, BatteryHistoryActivity::class.java)
+                        .putExtra(BatteryHistoryActivity.EXTRA_ADDRESS, addr),
+                )
+            }
+        }
+        // Shown only while the service is up but the link is not — the service
+        // already retries on its own; this skips the wait when the headphones
+        // have just come back and the next scheduled attempt is still a minute
+        // out.
+        binding.btnRetryNow.setOnClickListener {
+            if (!serviceRunning) {
+                Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            binding.btnRetryNow.isEnabled = false
+            binding.btnRetryNow.text = "Retrying…"
+            sendToService(ACTION_RECONNECT_NOW) {}
+            // Re-enabled by the next status broadcast, which the connect attempt
+            // produces almost immediately ("Connecting…" → connected or back to
+            // waiting). A fallback keeps the button from getting stuck if no
+            // broadcast arrives.
+            Handler(Looper.getMainLooper()).postDelayed({
+                binding.btnRetryNow.isEnabled = true
+                if (binding.btnRetryNow.text == "Retrying…") binding.btnRetryNow.text = "Retry now"
+            }, 4000)
+        }
         // ---- Ambient sound control: the three modes live in one card, and the active
         // one is highlighted. The old quick buttons gave no feedback about which mode
         // was actually selected, so you had to read the notification to know.
@@ -449,29 +531,6 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) { loadDeviceSettings() }
             override fun onNothingSelected(p: AdapterView<*>?) {} }
 
-        // Protocol override. Auto-detect falls back to XM6 for any name it does not
-        // recognise, which is the wrong thing to be stuck with on hardware you cannot
-        // test — so the model can be pinned explicitly. Applies on next start.
-        val profileValues = arrayOf("auto", "xm6", "xm5")
-        val profileAdapter = android.widget.ArrayAdapter<String>(this, android.R.layout.simple_spinner_item)
-        profileAdapter.addAll("Auto-detect", "WH-1000XM6", "WH-1000XM5")
-        profileAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        binding.spinnerProfile.adapter = profileAdapter
-        var profileSpinnerReady = false
-        binding.spinnerProfile.setSelection(
-            profileValues.indexOf(profilePreference()).coerceAtLeast(0),
-        )
-        profileSpinnerReady = true
-        binding.spinnerProfile.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                if (!profileSpinnerReady) return
-                val value = profileValues.getOrElse(pos) { "auto" }
-                getSharedPreferences("anc_settings", MODE_PRIVATE).edit()
-                    .putString("profile_override", value).apply()
-                updateProfileLabel()
-            }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
         updateProfileLabel()
 
         // EQ
@@ -480,9 +539,9 @@ class MainActivity : AppCompatActivity() {
         binding.btnEQClear.setOnClickListener { selectPreset(0x31) }
         binding.btnEQHard.setOnClickListener { selectPreset(0x32) }
         binding.btnEQSoft.setOnClickListener { selectPreset(0x33) }
-        binding.btnEQCustom.setOnClickListener { selectEditablePreset(0xA0, "Custom") }
-        binding.btnEQUser1.setOnClickListener { selectEditablePreset(0xA1, "User 1") }
-        binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2, "User 2") }
+        binding.btnEQCustom.setOnClickListener { selectEditablePreset(0xA0) }
+        binding.btnEQUser1.setOnClickListener { selectEditablePreset(0xA1) }
+        binding.btnEQUser2.setOnClickListener { selectEditablePreset(0xA2) }
         binding.btnApplyCustomEQ.setOnClickListener { applyCustomEQ() }
 
         // ---- Multipoint ----
@@ -727,6 +786,9 @@ class MainActivity : AppCompatActivity() {
 
     private var automationRules: List<Automation.Rule> = emptyList()
 
+    /** Row currently being reordered by the touch-driven drag, or null. */
+    private var dragMovedRow: android.view.View? = null
+
     /** Mirrors the service's autoPaused so Home and Routines agree with the notification. */
     private var autoPaused = false
 
@@ -790,11 +852,6 @@ class MainActivity : AppCompatActivity() {
             })
             return
         }
-        // Rule id -> row, so a drag can move the live view rather than rebuilding
-        // the list underneath itself. Re-rendering mid-drag destroys the view
-        // being dragged and the gesture stalls.
-        val rowsById = mutableMapOf<String, android.view.View>()
-
         automationRules.forEachIndexed { index, rule ->
             val row = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
@@ -803,7 +860,7 @@ class MainActivity : AppCompatActivity() {
                 isClickable = true
                 setBackgroundColor(if (rule.enabled) 0x22334466 else 0x00000000)
             }
-            rowsById[rule.id] = row
+            row.tag = rule.id
 
             // Order is the rule's behaviour, not decoration — the first match wins —
             // so it needs a handle that can be grabbed, and a number that shows
@@ -813,10 +870,51 @@ class MainActivity : AppCompatActivity() {
                 gravity = android.view.Gravity.CENTER
                 setPadding(dp(10), dp(6), dp(6), dp(6))
                 contentDescription = "Reorder rule ${index + 1}"
-                setOnLongClickListener { v ->
-                    val clip = android.content.ClipData.newPlainText("rule", rule.id)
-                    v.startDragAndDrop(clip, android.view.View.DragShadowBuilder(v), rule.id, 0)
+
+                // Reordering is driven by the raw touch stream, not the
+                // framework's drag-and-drop system. startDragAndDrop delivers
+                // events wherever the framework decides the drag target is,
+                // which proved unreliable inside this list twice over (v1.99:
+                // mutating the hierarchy killed the events; v2.00: the
+                // container-level listener still never moved rows on real
+                // hardware). A long-press here claims the stream with
+                // requestDisallowInterceptTouchEvent, and every subsequent
+                // MOVE is handled locally — no drag targeting involved.
+                setOnLongClickListener {
+                    dragMovedRow = row
+                    requestDisallowInterceptTouchEvent(true)
+                    row.translationZ = 12f
+                    row.alpha = 0.85f
+                    performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
                     true
+                }
+                setOnTouchListener { _, ev ->
+                    val moved = dragMovedRow ?: return@setOnTouchListener false
+                    when (ev.action) {
+                        android.view.MotionEvent.ACTION_MOVE -> {
+                            reorderAutomationByPointer(ev.rawY, moved)
+                            true
+                        }
+                        android.view.MotionEvent.ACTION_UP -> {
+                            dragMovedRow = null
+                            moved.translationZ = 0f
+                            moved.alpha = 1f
+                            // Save without rendering inline: renderAutomation()
+                            // tears down the rows, and this very touch event is
+                            // still being dispatched to one of them.
+                            Automation.save(this@MainActivity, automationRules)
+                            sendToService(ACTION_RELOAD_AUTOMATION) {}
+                            box.post { renderAutomation() }
+                            true
+                        }
+                        android.view.MotionEvent.ACTION_CANCEL -> {
+                            dragMovedRow = null
+                            moved.translationZ = 0f
+                            moved.alpha = 1f
+                            true
+                        }
+                        else -> true
+                    }
                 }
             }
             handle.addView(android.widget.TextView(this).apply {
@@ -875,42 +973,18 @@ class MainActivity : AppCompatActivity() {
             val toggle = android.widget.Switch(this).apply {
                 isChecked = rule.enabled
                 setOnCheckedChangeListener { _, checked ->
-                    automationRules = automationRules.toMutableList().also {
-                        it[index] = it[index].copy(enabled = checked)
+                    // Locate the rule by id — positions captured at render time
+                    // go stale once a drag has reordered the list.
+                    automationRules = automationRules.map {
+                        if (it.id == rule.id) it.copy(enabled = checked) else it
                     }
                     saveAutomation()
                 }
             }
             row.addView(toggle)
-            row.setOnClickListener { showRuleEditor(index) }
-
-            // Reorder as the row is entered, so the list follows the finger, and
-            // only the final position is written to storage.
-            row.setOnDragListener { _, ev ->
-                when (ev.action) {
-                    android.view.DragEvent.ACTION_DRAG_STARTED ->
-                        ev.clipDescription?.hasMimeType("text/plain") == true
-                    android.view.DragEvent.ACTION_DRAG_ENTERED -> {
-                        val id = ev.clipData?.getItemAt(0)?.text?.toString()
-                        val from = automationRules.indexOfFirst { it.id == id }
-                        if (id != null && from >= 0 && from != index) {
-                            automationRules = automationRules.toMutableList().also {
-                                it.add(index, it.removeAt(from))
-                            }
-                            rowsById[id]?.let { moved ->
-                                box.removeView(moved)
-                                box.addView(moved, index)
-                            }
-                        }
-                        true
-                    }
-                    android.view.DragEvent.ACTION_DROP, android.view.DragEvent.ACTION_DRAG_ENDED -> {
-                        saveAutomation()
-                        renderAutomation()
-                        true
-                    }
-                    else -> true
-                }
+            row.setOnClickListener {
+                val pos = automationRules.indexOfFirst { it.id == rule.id }
+                if (pos >= 0) showRuleEditor(pos)
             }
 
             box.addView(row, android.widget.LinearLayout.LayoutParams(
@@ -930,11 +1004,61 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(4), dp(12), 0, 0)
             })
         }
+
+    }
+
+    /**
+     * Touch-driven reorder: [rawPointerY] is the pointer's screen-space Y (the
+     * motion event's rawY). The insertion point is derived from geometry — how
+     * many other rule rows have their midline above the pointer — reading the
+     * live view tree on every move. Nothing can go stale and no framework
+     * drag-target decision is involved: the handle that started the drag keeps
+     * receiving the events because it claimed the stream.
+     */
+    private fun reorderAutomationByPointer(rawPointerY: Float, moved: android.view.View) {
+        val box = binding.automationList
+        if (box.indexOfChild(moved) < 0) return
+        val loc = IntArray(2)
+        box.getLocationOnScreen(loc)
+        val pointerY = rawPointerY - loc[1]
+
+        val ruleRows = (0 until box.childCount).map { box.getChildAt(it) }
+            .filter { it.tag is String }
+        val others = ruleRows.filter { it !== moved }
+        val insertPos = others.count { pointerY > it.top + it.height / 2f }
+        val currentOrder = ruleRows.map { it.tag as String }
+        val newOrder = others.map { it.tag as String }.toMutableList()
+            .also { it.add(insertPos, moved.tag as String) }
+        if (newOrder == currentOrder) return
+
+        box.removeView(moved)
+        val anchorIndex = if (insertPos < others.size) {
+            box.indexOfChild(others[insertPos])
+        } else {
+            // Append after the last rule row; the tag-less hint text closes the box.
+            if (box.getChildAt(box.childCount - 1).tag == null) box.childCount - 1 else box.childCount
+        }
+        box.addView(moved, anchorIndex)
+
+        // Mirror the live order back onto the rules list.
+        automationRules = (0 until box.childCount).mapNotNull { c ->
+            val id = box.getChildAt(c).tag as? String
+            id?.let { cid -> automationRules.firstOrNull { it.id == cid } }
+        }
     }
 
     /**
      * Rule editor: three spinners (when / do / value) in one dialog. Long-pressing a
      * rule in the list deletes it, which keeps this to a single interaction surface.
+     */
+    /**
+     * Rule editor: one trigger, an ordered list of actions, optional conditions.
+     *
+     * The old editor edited exactly one action, which made "set NC and EQ and
+     * volume" impossible — three rules on the same trigger would have matched
+     * the first and dropped the rest. Actions are rows now, applied in order.
+     * Conditions are rows too, so a rule can be scoped to a time window, the
+     * wear state, or a battery floor without inventing a separate trigger.
      */
     private fun showRuleEditor(existingIndex: Int?) {
         val triggers = Automation.Trigger.values()
@@ -954,46 +1078,66 @@ class MainActivity : AppCompatActivity() {
             Automation.ActionType.SET_AUTO_POWER,
             Automation.ActionType.SET_VOICE_GUIDANCE,
         )
+        val levelOptions = listOf(5, 10, 15, 20)
+        val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
+        val percentOptions = listOf(10, 20, 30, 40, 50, 60, 70, 80, 90)
+        // Half-hour steps: fine enough for "22:30", without 1440 rows.
+        val clockOptions = (0 until 48).map { Automation.clock(it * 30) }
+
         val base = existingIndex?.let { automationRules[it] }
-            ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START, Automation.Action())
+            ?: Automation.Rule("rule-${System.currentTimeMillis()}", Automation.Trigger.PLAYBACK_START)
+
+        /** Assigned once the row lists exist; declared early so rows can call it. */
+        var refreshPreview: () -> Unit = {}
 
         val linear = android.widget.LinearLayout(this).apply {
             orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(48, 32, 48, 8)
+            setPadding(dp(12), dp(4), dp(12), dp(4))
         }
-        fun <T> spinner(caption: String, items: List<T>, selected: Int): android.widget.Spinner {
-            linear.addView(android.widget.TextView(this).apply {
-                text = caption
-                textSize = 11f
-                setTextColor(Color.rgb(150, 150, 150))
-            })
-            val sp = android.widget.Spinner(this)
-            sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
-                it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        val scroll = android.widget.ScrollView(this).apply { addView(linear) }
+
+        fun caption(text: String) = android.widget.TextView(this).apply {
+            this.text = text
+            textSize = 11f
+            setTextColor(Color.rgb(150, 150, 150))
+            setPadding(0, dp(10), 0, 0)
+        }
+
+        fun newSpinner(items: List<String>, selected: Int = 0): android.widget.Spinner =
+            android.widget.Spinner(this).apply {
+                adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, items).also {
+                    it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+                }
+                setSelection(selected.coerceIn(0, maxOf(0, items.size - 1)))
             }
-            sp.setSelection(selected)
-            linear.addView(sp)
-            return sp
+
+        fun removeButton(onClick: () -> Unit) = android.widget.TextView(this).apply {
+            text = "✕"
+            textSize = 18f
+            setTextColor(Color.rgb(200, 120, 120))
+            setPadding(dp(12), dp(6), dp(2), dp(6))
+            setOnClickListener { onClick() }
         }
 
-        val whenSp = spinner("When", triggers.map { it.label }, triggers.indexOf(base.trigger))
-        val doSp = spinner("Do", actionTypes.map { it.label }, actionTypes.indexOf(base.action.type).coerceAtLeast(0))
-        val valueSp = android.widget.Spinner(this).also {
-            linear.addView(android.widget.TextView(this).apply {
-                text = "Value"
-                textSize = 11f
-                setTextColor(Color.rgb(150, 150, 150))
-            })
-            linear.addView(it)
+        linear.addView(caption("WHEN"))
+        val whenSp = newSpinner(triggers.map { it.label }, triggers.indexOf(base.trigger))
+        linear.addView(whenSp)
+
+        // ---- actions ----
+
+        /** Rows are kept as the views themselves; their items are read at save time. */
+        data class ActionRow(
+            val root: android.widget.LinearLayout,
+            val type: android.widget.Spinner,
+            val value: android.widget.Spinner,
+        )
+
+        val actionRows = mutableListOf<ActionRow>()
+        val actionsBox = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
         }
 
-        val levelOptions = listOf(5, 10, 15, 20)
-        val eqIds = listOf(0x00, 0x30, 0x31, 0x32, 0x33, 0xA0, 0xA1, 0xA2)
-
-        // The value list has to follow the chosen action. It used to be a fixed
-        // 4-item list that SET_MODE and SET_EQ_PRESET silently ignored, so those
-        // two actions could only ever produce "noise cancelling" and "Heavy".
-        fun fillValues(type: Automation.ActionType, select: Int) {
+        fun fillValues(type: Automation.ActionType, sp: android.widget.Spinner, select: Int) {
             val items: List<String> = when {
                 type in Automation.ActionType.TOGGLES -> listOf("On", "Off")
                 type == Automation.ActionType.SET_AUTO_POWER ->
@@ -1005,42 +1149,38 @@ class MainActivity : AppCompatActivity() {
                 type == Automation.ActionType.SET_EQ_PRESET -> eqIds.map { Automation.presetName(it) }
                 else -> emptyList()
             }
-            valueSp.visibility =
-                if (items.isEmpty()) android.view.View.GONE else android.view.View.VISIBLE
-            valueSp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
+            sp.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+            sp.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items).also {
                 it.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
-            valueSp.setSelection(select.coerceIn(0, maxOf(0, items.size - 1)))
+            sp.setSelection(select.coerceIn(0, maxOf(0, items.size - 1)))
         }
 
-        val initialType = actionTypes[doSp.selectedItemPosition]
-        fillValues(initialType, when (initialType) {
+        fun initialValueIndex(type: Automation.ActionType, a: Automation.Action): Int = when (type) {
             Automation.ActionType.SET_MODE ->
-                Automation.Mode.values().indexOf(base.action.mode).coerceAtLeast(0)
+                Automation.Mode.values().indexOf(a.mode).coerceAtLeast(0)
             Automation.ActionType.SET_EQ_PRESET ->
-                eqIds.indexOf(base.action.presetId).let { if (it < 0) 1 else it }
+                eqIds.indexOf(a.presetId).let { if (it < 0) 1 else it }
             Automation.ActionType.SET_AUTO_POWER ->
-                Automation.AutoPower.values().indexOf(base.action.power).coerceAtLeast(0)
+                Automation.AutoPower.values().indexOf(a.power).coerceAtLeast(0)
             Automation.ActionType.SET_AMBIENT_LEVEL,
             Automation.ActionType.SET_VOLUME,
             Automation.ActionType.SET_VOICE_GUIDANCE ->
-                levelOptions.indexOf(base.action.value).let { if (it < 0) 1 else it }
-            in Automation.ActionType.TOGGLES -> if (base.action.value != 0) 0 else 1
+                levelOptions.indexOf(a.value).let { if (it < 0) 1 else it }
+            in Automation.ActionType.TOGGLES -> if (a.value != 0) 0 else 1
             else -> 0
-        })
+        }
 
         /**
-         * The action the three spinners currently describe.
+         * The action the row's spinners describe.
          *
-         * Used by both the live preview and the save handler. Keeping one builder
-         * means the sentence shown while editing is the sentence that gets stored
-         * -- a preview assembled by a second, near-identical `when` would drift
-         * from the rule it claims to describe, which is exactly how the EQ screen
-         * came to read a preset correctly while gating on a different one.
+         * One builder used by both the preview and the save handler: a second,
+         * near-identical `when` is how the EQ screen came to preview one preset
+         * while gating on another.
          */
-        fun currentAction(): Automation.Action {
-            val type = actionTypes[doSp.selectedItemPosition]
-            val pos = valueSp.selectedItemPosition
+        fun actionOf(row: ActionRow): Automation.Action {
+            val type = actionTypes[row.type.selectedItemPosition]
+            val pos = maxOf(0, row.value.selectedItemPosition)
             return when (type) {
                 Automation.ActionType.SET_MODE -> Automation.Action(
                     type = type,
@@ -1062,43 +1202,226 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val preview = android.widget.TextView(this).apply {
-            textSize = 13f
-            setTextColor(Color.rgb(127, 212, 168))
-            setPadding(0, 16, 0, 4)
-        }
-        linear.addView(preview)
-        fun refreshPreview() {
-            val trigger = triggers[whenSp.selectedItemPosition]
-            preview.text = "When ${trigger.label.lowercase()}, " +
-                Automation.describe(
-                    base.copy(trigger = trigger, action = currentAction()),
-                )
-        }
-        doSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                fillValues(actionTypes[pos], 1)
-                refreshPreview()
+        fun addActionRow(a: Automation.Action) {
+            val inner = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
             }
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-        listOf(whenSp, valueSp).forEach { sp ->
-            sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            val typeSp = newSpinner(actionTypes.map { it.label }, actionTypes.indexOf(a.type).coerceAtLeast(0))
+            val valueSp = newSpinner(emptyList())
+            fillValues(a.type, valueSp, initialValueIndex(a.type, a))
+            inner.addView(typeSp)
+            inner.addView(valueSp)
+
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            row.addView(inner, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val holder = ActionRow(row, typeSp, valueSp)
+            row.addView(removeButton {
+                // Never leave zero actions: an empty list would save a rule that
+                // does nothing and cannot be edited back from the list.
+                if (actionRows.size <= 1) {
+                    toast("A rule needs at least one action")
+                } else {
+                    actionsBox.removeView(row)
+                    actionRows.remove(holder)
+                    refreshPreview()
+                }
+            })
+            actionsBox.addView(row)
+            actionRows.add(holder)
+
+            typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    fillValues(actionTypes[pos], valueSp, 0)
+                    refreshPreview()
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+            valueSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
                     refreshPreview()
                 override fun onNothingSelected(p: AdapterView<*>?) {}
             }
         }
+
+        linear.addView(caption("DO — applied in this order"))
+        linear.addView(actionsBox)
+        val addAction = android.widget.Button(this).apply {
+            text = "+ Add action"
+            textSize = 12f
+            setTextColor(Color.rgb(127, 212, 168))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                addActionRow(Automation.Action())
+                refreshPreview()
+            }
+        }
+        linear.addView(addAction)
+
+        // ---- conditions ----
+
+        data class ConditionRow(
+            val root: android.widget.LinearLayout,
+            val type: android.widget.Spinner,
+            val days: android.widget.Spinner,
+            val start: android.widget.Spinner,
+            val end: android.widget.Spinner,
+            val worn: android.widget.Spinner,
+            val percent: android.widget.Spinner,
+        )
+
+        val conditionRows = mutableListOf<ConditionRow>()
+        val conditionsBox = android.widget.LinearLayout(this).apply {
+            orientation = android.widget.LinearLayout.VERTICAL
+        }
+
+        fun conditionOf(row: ConditionRow): Automation.Condition {
+            val type = Automation.ConditionType.values()[row.type.selectedItemPosition]
+            return when (type) {
+                Automation.ConditionType.TIME_WINDOW -> Automation.Condition(
+                    type = type,
+                    days = when (row.days.selectedItemPosition) {
+                        1 -> setOf(1, 2, 3, 4, 5)
+                        2 -> setOf(6, 7)
+                        else -> emptySet()
+                    },
+                    startMinute = row.start.selectedItemPosition * 30,
+                    endMinute = row.end.selectedItemPosition * 30,
+                )
+                Automation.ConditionType.WORN -> Automation.Condition(
+                    type = type, worn = row.worn.selectedItemPosition == 0,
+                )
+                Automation.ConditionType.BATTERY_ABOVE -> Automation.Condition(
+                    type = type,
+                    percent = percentOptions.getOrElse(row.percent.selectedItemPosition) { 50 },
+                )
+            }
+        }
+
+        fun addConditionRow(c: Automation.Condition) {
+            val typeSp = newSpinner(
+                Automation.ConditionType.values().map { it.label },
+                Automation.ConditionType.values().indexOf(c.type),
+            )
+            val daysSp = newSpinner(
+                listOf("Every day", "Weekdays", "Weekends"),
+                when (c.days) {
+                    emptySet<Int>() -> 0
+                    setOf(1, 2, 3, 4, 5) -> 1
+                    setOf(6, 7) -> 2
+                    else -> 0
+                },
+            )
+            val startSp = newSpinner(clockOptions, (c.startMinute / 30).coerceIn(0, 47))
+            val endSp = newSpinner(clockOptions, (c.endMinute / 30).coerceIn(0, 47))
+            val wornSp = newSpinner(listOf("Worn", "Taken off"), if (c.worn) 0 else 1)
+            val percentSp = newSpinner(
+                percentOptions.map { "above $it%" },
+                percentOptions.indexOf(c.percent).let { if (it < 0) 4 else it },
+            )
+
+            val times = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+            }
+            times.addView(daysSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1.4f))
+            times.addView(startSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            times.addView(endSp, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+
+            val inner = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+            }
+            inner.addView(typeSp)
+            inner.addView(times)
+            inner.addView(wornSp)
+            inner.addView(percentSp)
+
+            fun applyType() {
+                val type = Automation.ConditionType.values()[typeSp.selectedItemPosition]
+                times.visibility = if (type == Automation.ConditionType.TIME_WINDOW) View.VISIBLE else View.GONE
+                wornSp.visibility = if (type == Automation.ConditionType.WORN) View.VISIBLE else View.GONE
+                percentSp.visibility = if (type == Automation.ConditionType.BATTERY_ABOVE) View.VISIBLE else View.GONE
+            }
+
+            val row = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+            row.addView(inner, android.widget.LinearLayout.LayoutParams(0, android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            val holder = ConditionRow(row, typeSp, daysSp, startSp, endSp, wornSp, percentSp)
+            row.addView(removeButton {
+                conditionsBox.removeView(row)
+                conditionRows.remove(holder)
+                refreshPreview()
+            })
+            conditionsBox.addView(row)
+            conditionRows.add(holder)
+
+            typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    applyType()
+                    refreshPreview()
+                }
+                override fun onNothingSelected(p: AdapterView<*>?) {}
+            }
+            listOf(daysSp, startSp, endSp, wornSp, percentSp).forEach { sp ->
+                sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                    override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
+                        refreshPreview()
+                    override fun onNothingSelected(p: AdapterView<*>?) {}
+                }
+            }
+            applyType()
+        }
+
+        linear.addView(caption("ONLY IF — all must hold"))
+        linear.addView(conditionsBox)
+        val addCondition = android.widget.Button(this).apply {
+            text = "+ Add condition"
+            textSize = 12f
+            setTextColor(Color.rgb(127, 212, 168))
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnClickListener {
+                addConditionRow(Automation.Condition())
+                refreshPreview()
+            }
+        }
+        linear.addView(addCondition)
+
+        val preview = android.widget.TextView(this).apply {
+            textSize = 13f
+            setTextColor(Color.rgb(127, 212, 168))
+            setPadding(0, dp(12), 0, dp(4))
+        }
+        linear.addView(preview)
+
+        fun currentRule(): Automation.Rule = base.copy(
+            trigger = triggers[whenSp.selectedItemPosition],
+            actions = actionRows.map { actionOf(it) },
+            conditions = conditionRows.map { conditionOf(it) },
+        )
+
+        refreshPreview = {
+            val r = currentRule()
+            preview.text = "When ${r.trigger.label.lowercase()}: ${Automation.describe(r)}"
+        }
+
+        whenSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) =
+                refreshPreview()
+            override fun onNothingSelected(p: AdapterView<*>?) {}
+        }
+
+        base.actions.forEach { addActionRow(it) }
+        base.conditions.forEach { addConditionRow(it) }
         refreshPreview()
 
         val dialog = android.app.AlertDialog.Builder(this)
             .setTitle(if (existingIndex == null) "New rule" else "Edit rule")
-            .setView(linear)
+            .setView(scroll)
             .setPositiveButton("Save") { _, _ ->
-                val rule = base.copy(
-                    trigger = triggers[whenSp.selectedItemPosition],
-                    action = currentAction(),
-                )
+                val rule = currentRule()
                 automationRules = if (existingIndex == null) {
                     automationRules + rule
                 } else {
@@ -1127,13 +1450,18 @@ class MainActivity : AppCompatActivity() {
             else "Peripheral/multipoint family not supported on this device"
             return
         }
-        for (i in multiMacs.indices) {
+
+        // Connected devices first, stable within the two groups. The original
+        // indices are kept so row callbacks still address the source arrays.
+        val order = multiMacs.indices
+            .sortedByDescending { multiConnected.getOrElse(it) { false } }
+
+        for ((visualIndex, i) in order.withIndex()) {
             val name = multiNames.getOrElse(i) { multiMacs[i] }
             val isActive = multiActive.getOrElse(i) { false }
+            val isConnected = multiConnected.getOrElse(i) { false }
 
-            // Was a single row crammed with name + MAC + a full Button, which
-            // rendered as one long strip with a grey block hanging off the end.
-            // Now: device identity on the first line, the quiet detail on the
+            // Device identity on the first line, the quiet detail on the
             // second, and the destructive action as a borderless text action
             // rather than a filled button competing with the row itself.
             val row = android.widget.LinearLayout(this).apply {
@@ -1143,13 +1471,31 @@ class MainActivity : AppCompatActivity() {
                     this@MainActivity,
                     if (isActive) R.drawable.bg_device_row_active else R.drawable.bg_device_row
                 )
-                isClickable = !isActive
+                // Switching to a device the headphones are not connected to is
+                // refused by the headset; do not offer it as a tap target.
+                isClickable = !isActive && isConnected
             }
 
             val top = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.HORIZONTAL
                 gravity = android.view.Gravity.CENTER_VERTICAL
             }
+            // A state dot ahead of the name carries connected/active at a
+            // glance, independent of the label on the right.
+            top.addView(android.widget.TextView(this).apply {
+                text = "●"
+                textSize = 11f
+                setTextColor(
+                    when {
+                        isActive -> Color.rgb(140, 225, 190)
+                        isConnected -> Color.rgb(150, 190, 230)
+                        else -> Color.rgb(95, 95, 95)
+                    },
+                )
+            }, android.widget.LinearLayout.LayoutParams(
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { marginEnd = dp(8) })
             top.addView(android.widget.TextView(this).apply {
                 text = name
                 textSize = 15f
@@ -1162,7 +1508,8 @@ class MainActivity : AppCompatActivity() {
             val statusText = when {
                 isActive && playbackFixed -> "Active · locked"
                 isActive -> "Active"
-                else -> "Tap to switch"
+                isConnected -> "Connected · tap to switch"
+                else -> "Not connected"
             }
             top.addView(android.widget.TextView(this).apply {
                 text = statusText
@@ -1171,6 +1518,7 @@ class MainActivity : AppCompatActivity() {
                     when {
                         isActive && playbackFixed -> Color.rgb(255, 205, 120)
                         isActive -> Color.rgb(140, 225, 190)
+                        isConnected -> Color.rgb(150, 190, 230)
                         else -> Color.rgb(110, 110, 110)
                     },
                 )
@@ -1230,7 +1578,7 @@ class MainActivity : AppCompatActivity() {
             }
             row.addView(bottom)
 
-            if (!isActive) {
+            if (!isActive && isConnected) {
                 row.setOnClickListener {
                     if (!BluetoothAncService.isRunning) { toast("Start service first"); return@setOnClickListener }
                     sendToService(ACTION_SOURCE_SWITCH) { putExtra(EXTRA_TARGET_MAC, multiMacs[i]) }
@@ -1242,7 +1590,7 @@ class MainActivity : AppCompatActivity() {
             ).apply {
                 // Rows were stacked with no gap, so adjacent devices shared a
                 // border and read as one block.
-                if (i > 0) topMargin = dp(8)
+                if (visualIndex > 0) topMargin = dp(8)
             })
         }
         // No status line under the list. It spent its life as a switch message --
@@ -1367,53 +1715,100 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectPreset(presetId: Int) {
         if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
-        val preset = EQPreset.fromId(presetId)
-        binding.textEQStatus.text = "↻ ${preset.displayName}"
         selectedEQProfile = presetId
+        eqPendingId = presetId
+        eqPendingBands = null
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
         sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, presetId) }
-        binding.eqGraph.interactive = false
-        binding.btnApplyCustomEQ.visibility = View.GONE
-        Handler(Looper.getMainLooper()).postDelayed({
-            binding.textEQStatus.text = preset.displayName
-        }, 2000)
+        updateEQStatus()
     }
 
-    private fun selectEditablePreset(profileId: Int, label: String) {
+    private fun selectEditablePreset(profileId: Int) {
+        if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
         selectedEQProfile = profileId
-        // Sync current eqBandValues to graph
-        binding.eqGraph.bandValues = eqBandValues
-        if (BluetoothAncService.isRunning) {
-            binding.textEQStatus.text = "↻ $label — drag curve then Write"
-            sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, profileId) }
-        }
-        binding.eqGraph.interactive = true
-        binding.btnApplyCustomEQ.visibility = View.VISIBLE
-        binding.btnApplyCustomEQ.text = "Write to $label"
+        eqPendingId = profileId
+        eqPendingBands = null
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
+        sendToService(ACTION_SET_EQ) { putExtra(EXTRA_EQ_PRESET, profileId) }
+        updateEQStatus()
     }
 
     private fun applyCustomEQ() {
         if (!BluetoothAncService.isRunning) { Toast.makeText(this, "Start service first", Toast.LENGTH_SHORT).show(); return }
-        // Read values from graph view for Apply
-        val presetName = EQPreset.fromId(selectedEQProfile).displayName
-        binding.textEQStatus.text = "↻ Writing $presetName..."
-        sendToService(ACTION_SET_EQ_CUSTOM) { 
+        eqPendingId = selectedEQProfile
+        eqPendingBands = binding.eqGraph.bandValues.copyOf()
+        eqPendingAt = android.os.SystemClock.elapsedRealtime()
+        sendToService(ACTION_SET_EQ_CUSTOM) {
             putExtra(EXTRA_EQ_BANDS, binding.eqGraph.bandValues)
             putExtra(EXTRA_EQ_PRESET, selectedEQProfile)
         }
-        Handler(Looper.getMainLooper()).postDelayed({
-            if (binding.textEQStatus.text.startsWith("↻")) updateEQStatus()
-        }, 3000)
+        updateEQStatus()
     }
 
+    /**
+     * Single renderer for the EQ status line, the curve and the preset-button
+     * highlight. Everything is derived from the headset's actual reported
+     * state, with a pending-write window so a label cannot be flipped back to
+     * the old preset by an unrelated stats broadcast in mid-write.
+     */
     private fun updateEQStatus() {
-        val preset = EQPreset.fromId(eqActivePreset)
+        val actual = eqActivePreset
         val bands = eqActiveBands
-        binding.textEQStatus.text = if (bands != null && bands.size == 10) {
-            "${preset.displayName} [${bands.joinToString(" ") { "%+d".format(it) }}]"
-        } else {
-            preset.displayName
+
+        // Resolve the pending write: the preset arrived, and for a custom
+        // write the reported bands match what was sent — or the window gave
+        // up and the actual state takes over again.
+        val pending = eqPendingId
+        val expired = pending != null &&
+            android.os.SystemClock.elapsedRealtime() - eqPendingAt > eqPendingTimeoutMs
+        val arrived = pending != null && pending == actual &&
+            (eqPendingBands == null ||
+                (bands != null && bands.size == 10 && bands.contentEquals(eqPendingBands)))
+        if (expired || arrived) {
+            eqPendingId = null
+            eqPendingBands = null
+        }
+
+        // Editing is only possible while the headset has an editable slot
+        // (Custom / User 1-5) selected. The curve still renders what the
+        // headset reports — dimmed and non-interactive otherwise, so "what is
+        // set" stays visible without inviting writes that cannot happen.
+        val editable = EQPreset.isEditable(actual)
+        binding.eqGraph.interactive = editable
+        binding.btnApplyCustomEQ.visibility = if (editable) View.VISIBLE else View.GONE
+        binding.btnApplyCustomEQ.text = "Write to ${eqLabel(actual)}"
+        bands?.takeIf { it.size == 10 }?.let { src ->
+            for (i in 0..9) eqBandValues[i] = src[i].coerceIn(-6, 6)
+            binding.eqGraph.bandValues = eqBandValues
+        }
+
+        // The preset buttons highlight what the headset actually has — or,
+        // inside the pending window, what it is about to have — not the last
+        // button that happened to be tapped.
+        val highlightId = eqPendingId ?: actual
+        val buttons = mapOf(
+            0x00 to binding.btnEQOff, 0x30 to binding.btnEQHeavy,
+            0x31 to binding.btnEQClear, 0x32 to binding.btnEQHard,
+            0x33 to binding.btnEQSoft, 0xA0 to binding.btnEQCustom,
+            0xA1 to binding.btnEQUser1, 0xA2 to binding.btnEQUser2,
+        )
+        for ((id, button) in buttons) button.alpha = if (id == highlightId) 1f else 0.55f
+
+        binding.textEQStatus.text = when {
+            eqPendingId != null && eqPendingId != actual ->
+                "↻ Applying ${eqLabel(eqPendingId!!)}…"
+            eqPendingId != null ->
+                "↻ Writing ${eqLabel(eqPendingId!!)}…"
+            bands != null && bands.size == 10 ->
+                "${eqLabel(actual)} [${bands.joinToString(" ") { "%+d".format(it) }}]"
+            else -> eqLabel(actual)
         }
     }
+
+    /** Label for a preset id without inventing a preset that is not one. */
+    private fun eqLabel(id: Int): String =
+        EQPreset.entries.firstOrNull { it.id == id }?.displayName
+            ?: "Unknown (0x%02x)".format(id)
 
     // ---- Per-device settings ----
 
@@ -1426,8 +1821,8 @@ class MainActivity : AppCompatActivity() {
         binding.textLevelValue.text = level.toString()
         binding.switchVoice.isChecked = prefs.getBoolean("voice_passthrough_$addr", false)
         binding.switchAutoAmbient.isChecked = prefs.getBoolean("auto_ambient_$addr", false)
-        val name = pairedDevices.find { it.address == addr }?.name ?: ""
-        updateProfileLabel(name)
+        updateProfileLabel()
+        updateHeroTitle()
     }
 
 
@@ -1445,30 +1840,34 @@ class MainActivity : AppCompatActivity() {
         if (BluetoothAncService.isRunning) sendToService(ACTION_APPLY_AMBIENT) {}
     }
 
-    private fun profilePreference(): String =
-        getSharedPreferences("anc_settings", MODE_PRIVATE).getString("profile_override", "auto") ?: "auto"
-
     /**
-     * Mirrors the protocol the service will actually use. On auto it names the model
-     * detect() resolved to, so the silent XM6 fallback is visible rather than a
-     * surprise at connect time.
+     * The hero title is the headphones' Bluetooth name — the user's own name
+     * for them — with the model demoted to a small subtitle underneath: the
+     * app speaks XM6 and nothing else, so the model alone says little.
+     *
+     * The name prefers the service's live view of the connection. The bonded
+     * cache only refreshes when the headphones reconnect, so a rename that
+     * happened while paired would otherwise keep showing the old model name.
      */
-    private fun updateProfileLabel(deviceName: String = "") {
-        val pinned = profilePreference()
-        binding.textProfile.text = when (pinned) {
-            "xm5" -> "Protocol: WH-1000XM5 (pinned)"
-            "xm6" -> "Protocol: WH-1000XM6 (pinned)"
-            else -> {
-                val guess = HeadphoneProfile.detect(deviceName).modelName
-                // The default call sites pass no name, and the old code then
-                // announced "name not recognised" next to a correctly detected
-                // model. Only warn when there is a name and it does not look Sony.
-                val warn = if (deviceName.isBlank() || deviceName.contains("WH-1000", true) ||
-                    deviceName.contains("WF-1000", true) || deviceName.contains("XM", true)
-                ) "" else "  ·  unrecognised name"
-                "Protocol: $guess$warn"
-            }
-        }
+    private fun updateHeroTitle() {
+        val name = serviceName?.takeIf { it.isNotBlank() }
+            ?: pairedDevices.getOrNull(binding.spinnerDevice.selectedItemPosition)?.name?.takeIf { it.isNotBlank() }
+            ?: pairedDevices.firstOrNull()?.name?.takeIf { it.isNotBlank() }
+            ?: "WH-1000XM6"
+        binding.textModel.text = name
+        // Subtitle only when it adds information. The name usually mentions
+        // the model already ("hbubli's WH-1000XM6"), so *containing* the model
+        // string hides it — equality alone left the model printed twice. And
+        // an empty TextView still occupies its line, hence the visibility
+        // toggle rather than empty text.
+        binding.textModelSub.text = "WH-1000XM6"
+        binding.textModelSub.visibility =
+            if (name.contains("WH-1000XM6", ignoreCase = true)) View.GONE else View.VISIBLE
+    }
+
+    /** The app speaks the XM6 protocol and nothing else. */
+    private fun updateProfileLabel() {
+        binding.textProfile.text = "Protocol: WH-1000XM6"
     }
 
     private fun saveSetting(key: String, value: Any) {
@@ -1508,16 +1907,25 @@ class MainActivity : AppCompatActivity() {
         ) { updateCardStatus("Permission needed"); binding.btnToggle.isEnabled = false; return }
 
         for (d in (adapter.bondedDevices ?: emptySet())) {
-            val name = d.name ?: ""
-            if (name.contains("WH-1000XM", ignoreCase = true)) pairedDevices.add(DeviceInfo(name, d.address))
+            // The alias — a local rename some Bluetooth settings offer — is what
+            // the user actually sees in Settings; prefer it over the advertised
+            // name.
+            val display = HeadphoneProfile.bluetoothDisplayName(d) ?: d.name ?: ""
+            // XM6 only. An XM5 shares the XM6 service UUID but speaks the wrong
+            // protocol; listing it would start a service that half-works. The
+            // service refuses an XM5 by name as a second gate.
+            if ((display + " " + (d.name ?: "")).contains("WH-1000XM", ignoreCase = true) &&
+                !display.contains("XM5", ignoreCase = true)
+            ) pairedDevices.add(DeviceInfo(display, d.address))
         }
         if (pairedDevices.isEmpty()) {
-            binding.textModel.text = "No headphones"; updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
-            updateModelArt("")
+            binding.textModel.text = "No headphones"; binding.textModelSub.text = ""
+            updateCardStatus("Pair in Settings → Bluetooth"); binding.btnToggle.isEnabled = false
+            updateModelArt(false)
         } else {
-            val first = pairedDevices.first().name
-            binding.textModel.text = first; updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
-            updateModelArt(first)
+            updateCardStatus("${pairedDevices.size} device(s)"); binding.btnToggle.isEnabled = true
+            updateHeroTitle()
+            updateModelArt(true)
         }
         val listAdapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, pairedDevices)
         listAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
@@ -1528,17 +1936,15 @@ class MainActivity : AppCompatActivity() {
     // ---- Model artwork ----
 
     /**
-     * Swap the hero image for the connected model, falling back to the vector icon
-     * for anything without artwork yet (XM5, and unrecognised names). Product shots
+     * The hero artwork follows the *model*, not the Bluetooth name — the name
+     * is the user's own and rarely contains the model string. The app speaks
+     * XM6 and nothing else, so any paired device gets the XM6 artwork; the
+     * generic icon only appears when there is nothing paired. Product shots
      * live in drawable-nodpi so they are not rescaled per screen density.
      */
-    private fun updateModelArt(name: String) {
+    private fun updateModelArt(hasDevice: Boolean) {
         binding.imageModel.setImageResource(
-            when {
-                name.contains("XM6", ignoreCase = true) -> R.drawable.model_xm6
-                name.contains("XM5", ignoreCase = true) -> R.drawable.model_xm5
-                else -> R.drawable.ic_headphones_big
-            }
+            if (hasDevice) R.drawable.model_xm6 else R.drawable.ic_headphones_big
         )
     }
 
@@ -1564,14 +1970,20 @@ class MainActivity : AppCompatActivity() {
         Intent(this, BluetoothAncService::class.java).apply {
             action = ACTION_START
             putExtra(EXTRA_ADDRESS, device.address)
-            putExtra(EXTRA_PROFILE_OVERRIDE, profilePreference())
         }.also { if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(it) else startService(it) }
         updateServiceRunning(true); updateCardStatus("Starting…")
     }
 
     private fun stopService() {
         sendToService(ACTION_STOP) {}
-        updateServiceRunning(false); updateCardStatus("⏹ Stopped")
+        // Clear the readouts along with the service — they described a link
+        // that no longer exists, and leftover values read as if data were
+        // still current.
+        battery = null
+        currentMode = "—"
+        updateServiceRunning(false)
+        updateCardStats()
+        updateCardStatus("⏹ Stopped")
     }
 
     // ---- Dashboard card ----
@@ -1592,6 +2004,17 @@ class MainActivity : AppCompatActivity() {
         binding.btnToggle.setTextColor(
             if (running) Color.rgb(0xEC, 0xEE, 0xF0) else Color.rgb(0x0D, 0x0F, 0x11)
         )
+        if (!running) binding.btnRetryNow.visibility = View.GONE
+    }
+
+    /**
+     * "Retry now" only makes sense while the service is alive but the link is
+     * not — in WAITING, or mid-burst in CONNECTING. Hidden while connected and
+     * whenever the service reports it is not running.
+     */
+    private fun updateRetryVisibility(status: BluetoothAncService.Status) {
+        binding.btnRetryNow.visibility =
+            if (serviceRunning && status != BluetoothAncService.Status.CONNECTED) View.VISIBLE else View.GONE
     }
 
     private fun updateStatusDisplay(status: BluetoothAncService.Status, msg: String? = null) {
@@ -1601,20 +2024,20 @@ class MainActivity : AppCompatActivity() {
             BluetoothAncService.Status.DISCONNECTED -> Color.rgb(138, 138, 138)
             BluetoothAncService.Status.CONNECTING -> Color.rgb(232, 196, 120)
             BluetoothAncService.Status.CONNECTED -> Color.rgb(127, 212, 168)
+            // Standing by: service alive, headphones away. Blue reads as
+            // "waiting" and stays clearly apart from the connecting amber and
+            // the error red.
+            BluetoothAncService.Status.WAITING -> Color.rgb(120, 170, 220)
             BluetoothAncService.Status.ERROR -> Color.rgb(226, 128, 128)
         }
         val label = status.name.lowercase().replaceFirstChar { it.uppercase() }
-        // The broadcast message usually restates the status and sometimes adds
-        // detail ("Connecting…", "Disconnected, reconnecting…"). Comparing for
-        // equality was not enough — an ellipsis or trailing word both defeat it,
-        // which is why CONNECTING still rendered "CONNECTING — Connecting…".
-        // If the message already begins with the label, show the message alone:
-        // no duplication, and nothing is lost.
-        val text = when {
-            msg == null -> label
-            msg.trim().lowercase().startsWith(label.lowercase()) -> msg
-            else -> "$label — $msg"
-        }
+        // The service's messages are written to be self-sufficient ("Connected",
+        // "Waiting for headphones", "Reconnecting in 3s (attempt 2 of 5)"), so the
+        // message alone is shown whenever one exists. The old prefix logic tried
+        // to stitch "LABEL — message" together and kept producing duplicates or
+        // stitched lines like "Waiting — Headphones off — waiting"; dropping the
+        // label when a message is present avoids both.
+        val text = msg ?: label
         updateCardStatus(text)
         binding.textStatus.setTextColor(tint)
     }
