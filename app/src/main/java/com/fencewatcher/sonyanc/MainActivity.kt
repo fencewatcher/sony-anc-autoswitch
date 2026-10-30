@@ -1582,7 +1582,13 @@ class MainActivity : AppCompatActivity() {
         // old holo_green_dark is also a very saturated green; muted to sit with
         // the rest of the palette.
         binding.btnToggle.backgroundTintList = android.content.res.ColorStateList.valueOf(
-            if (running) Color.rgb(0x6A, 0x32, 0x32) else Color.rgb(0x3A, 0x5C, 0x46)
+            if (running) Color.rgb(0x6A, 0x32, 0x32) else Color.rgb(0x7F, 0xD4, 0xA8)
+        )
+        // The primary button is accent-filled when idle, so its label has to go
+        // dark on mint and light on the muted red. A fixed colour made one of
+        // the two states unreadable.
+        binding.btnToggle.setTextColor(
+            if (running) Color.rgb(0xEC, 0xEE, 0xF0) else Color.rgb(0x0D, 0x0F, 0x11)
         )
     }
 

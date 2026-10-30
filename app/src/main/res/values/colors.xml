@@ -1,8 +1,28 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!--
+      One palette, named by role rather than by shade. The old file had
+      `dark_gray` / `surface` and every other colour was a literal in a layout,
+      which is how the four tabs drifted apart. New work should use these names.
+    -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
-    <color name="dark_gray">#FF1E1E1E</color>
-    <color name="surface">#FF2D2D2D</color>
-    <color name="on_surface">#FFE0E0E0</color>
+
+    <!-- Surfaces -->
+    <color name="dark_gray">#FF0D0F11</color>
+    <color name="surface">#FF16191C</color>
+    <color name="surface_raised">#FF1C2024</color>
+    <color name="outline">#FF272C31</color>
+
+    <!-- Text -->
+    <color name="on_surface">#FFECEEF0</color>
+    <color name="text_secondary">#FF9AA2A9</color>
+    <color name="text_tertiary">#FF6B737A</color>
+
+    <!-- Accent: a cool mint, kept from the previous build so the app still
+         looks like itself, but used more deliberately. -->
+    <color name="accent">#FF7FD4A8</color>
+    <color name="accent_dim">#FF24332C</color>
+    <color name="warn">#FFFFC65C</color>
+    <color name="danger">#FFE5847A</color>
 </resources>
