@@ -34,6 +34,7 @@ class BluetoothAncService : Service() {
     private var refreshJob: Job? = null
     private var btSocket: BluetoothSocket? = null
     private var mediaMonitor: MediaPlaybackMonitor? = null
+    private var activityDetector: ActivityDetector? = null
     /**
      * One outgoing sequence counter, shared across both tables.
      *
@@ -245,6 +246,7 @@ class BluetoothAncService : Service() {
                     Log.d(tag, "Starting service, device=$address")
                     safeStartForeground()
                     serviceInit(address)
+                    startActivityAutomation()
                 }
 
                 ACTION_STOP -> {
@@ -252,6 +254,7 @@ class BluetoothAncService : Service() {
                     isRunning = false
                     status = Status.DISCONNECTED
                     broadcastStatus(status, "Stopped")
+                    stopActivityAutomation()
                     try { btSocket?.close() } catch (_: Exception) {}
                     stopSelf()
                 }
@@ -508,6 +511,7 @@ class BluetoothAncService : Service() {
         isRunning = false
         mediaMonitor?.stop()
         mediaMonitor = null
+        stopActivityAutomation()
         refreshJob?.cancel()
         // Close socket first to unblock the read() loop in the coroutine
         try {
@@ -1544,6 +1548,37 @@ class BluetoothAncService : Service() {
     fun reloadAutomation() {
         automationRules = Automation.load(this)
         Log.d(tag, "Automation rules reloaded: ${automationRules.size}")
+        syncActivityAutomation()
+    }
+
+    /**
+     * The accelerometer is only worth running while some enabled rule actually
+     * reacts to activity. Starting it unconditionally would drain battery for
+     * users who never use those triggers.
+     */
+    private fun syncActivityAutomation() {
+        val wanted = automationRules.any { it.enabled && it.trigger in ACTIVITY_TRIGGERS }
+        if (wanted) startActivityAutomation() else stopActivityAutomation()
+    }
+
+    private fun startActivityAutomation() {
+        if (activityDetector != null) return
+        val detector = ActivityDetector(this) { activity ->
+            val trigger = when (activity) {
+                ActivityDetector.Activity.STILL -> Automation.Trigger.ACTIVITY_STILL
+                ActivityDetector.Activity.WALK -> Automation.Trigger.ACTIVITY_WALK
+                ActivityDetector.Activity.RUN -> Automation.Trigger.ACTIVITY_RUN
+                ActivityDetector.Activity.VEHICLE -> Automation.Trigger.ACTIVITY_VEHICLE
+            }
+            scope.launch { runAutomation(trigger) }
+        }
+        activityDetector = detector
+        detector.start()
+    }
+
+    private fun stopActivityAutomation() {
+        activityDetector?.stop()
+        activityDetector = null
     }
 
     /**
@@ -2095,6 +2130,14 @@ class BluetoothAncService : Service() {
     companion object {
         const val TAG = "BTAncSvc"
         const val PACKAGE = "com.fencewatcher.sonyanc"
+
+        /** Triggers that need the accelerometer running. */
+        val ACTIVITY_TRIGGERS = setOf(
+            Automation.Trigger.ACTIVITY_STILL,
+            Automation.Trigger.ACTIVITY_WALK,
+            Automation.Trigger.ACTIVITY_RUN,
+            Automation.Trigger.ACTIVITY_VEHICLE,
+        )
 
         // Running state shared with the UI
         @Volatile

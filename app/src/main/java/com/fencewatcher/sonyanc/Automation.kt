@@ -31,7 +31,14 @@ object Automation {
         DEVICE_DISCONNECTED("device_disconnected", "Headphones disconnect"),
         BATTERY_LOW("battery_low", "Battery drops below 20%"),
         HEADPHONES_ON("headphones_on", "Headphones put on"),
-        HEADPHONES_OFF("headphones_off", "Headphones taken off");
+        HEADPHONES_OFF("headphones_off", "Headphones taken off"),
+
+        // On-device activity, classified from the accelerometer by
+        // [ActivityDetector]. No Play Services, no location permission.
+        ACTIVITY_STILL("activity_still", "Activity: sitting still"),
+        ACTIVITY_WALK("activity_walk", "Activity: walking"),
+        ACTIVITY_RUN("activity_run", "Activity: running"),
+        ACTIVITY_VEHICLE("activity_vehicle", "Activity: in a vehicle");
 
         companion object {
             fun from(id: String) = values().firstOrNull { it.id == id } ?: PLAYBACK_START
