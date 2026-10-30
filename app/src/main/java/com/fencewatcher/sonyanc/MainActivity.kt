@@ -27,6 +27,7 @@ import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_PROFILE_OVER
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MESSAGE
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_BATTERY
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_MODE
+import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_FW_VERSION
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_PRESET
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.EXTRA_EQ_ACTIVE_BANDS
 import com.fencewatcher.sonyanc.BluetoothAncService.Companion.ACTION_START
@@ -97,6 +98,7 @@ class MainActivity : AppCompatActivity() {
     private val pairedDevices = mutableListOf<DeviceInfo>()
     private var serviceRunning = false
     private var battery: Int? = null
+    private var fwVersion: String? = null
     private var currentMode = "—"
     private var selectedAddress: String? = null
     private var showingTab = 0
@@ -258,6 +260,7 @@ class MainActivity : AppCompatActivity() {
                 updateServiceRunning(s == BluetoothAncService.Status.CONNECTING || s == BluetoothAncService.Status.CONNECTED)
                 if (intent.hasExtra(EXTRA_BATTERY)) battery = intent.getIntExtra(EXTRA_BATTERY, 0)
                 if (intent.hasExtra(EXTRA_MODE)) currentMode = intent.getStringExtra(EXTRA_MODE) ?: "—"
+                if (intent.hasExtra(EXTRA_FW_VERSION)) fwVersion = intent.getStringExtra(EXTRA_FW_VERSION)
                 updateCardStats()
             }
             // EQ state from service
@@ -1613,6 +1616,9 @@ class MainActivity : AppCompatActivity() {
     private fun updateCardStats() {
         binding.textBattery.text = battery?.let { "$it%" } ?: "—"
         binding.textMode.text = currentMode
+        val fw = fwVersion
+        binding.textFirmware.visibility = if (fw.isNullOrBlank()) android.view.View.GONE else android.view.View.VISIBLE
+        if (!fw.isNullOrBlank()) binding.textFirmware.text = "FW $fw"
         updateModeHighlight()
     }
 

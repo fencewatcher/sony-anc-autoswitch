@@ -1110,6 +1110,17 @@ class BluetoothAncService : Service() {
                         }
                         broadcastStats()
                     }
+                    subtype == SonyMdrV2.COMMON_TYPE_DISPLAY_FW_VERSION && p.size >= 4 -> {
+                        val len = p[2].toInt() and 0xFF
+                        if (p.size >= 3 + len) {
+                            val version = String(p, 3, len, Charsets.UTF_8).trim()
+                            if (version.isNotEmpty() && version != fwVersion) {
+                                fwVersion = version
+                                Log.d(tag, "Firmware: $version")
+                                broadcastStats()
+                            }
+                        }
+                    }
                     subtype == SonyMdrV2.COMMON_TYPE_UPSCALING_EFFECT && p.size >= 4 -> {
                         val effect = p[2].toInt() and 0xFF
                         val st = p[3].toInt() and 0xFF
@@ -1279,6 +1290,7 @@ class BluetoothAncService : Service() {
         request(SonyMdrV2.buildQuickAccessEnableGet())
         request(SonyMdrV2.buildQuickAccessFunctionGet())
         request(SonyMdrV2.buildUpscalingStatusGet())
+        request(SonyMdrV2.buildFwVersionGet())
         request(byteArrayOf(SonyMdrV2.CMD_EQ_GET_PARAM.toByte(), SonyMdrV2.EQ_SUBTYPE_PRESET_AND_ERROR.toByte()))
         // Table 2 — peripheral / multipoint
         request(SonyMdrV2.buildPeripheralCapabilityGet(), SonyMdrV2.Table.T2)
@@ -1999,6 +2011,13 @@ class BluetoothAncService : Service() {
     var quickAccessEnabled: Boolean? = null
         private set
 
+    /**
+     * Firmware version string, read-only. There is deliberately no updater in
+     * this app — see sony-app-re/replacement-plan.md §3.1.
+     */
+    var fwVersion: String? = null
+        private set
+
     /** Per-button quick access functions. Index 0 = left, 1 = right. */
     var quickAccessFunctions: IntArray? = null
         private set
@@ -2074,6 +2093,7 @@ class BluetoothAncService : Service() {
             if (message != null) putExtra(EXTRA_MESSAGE, message)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            fwVersion?.let { putExtra(EXTRA_FW_VERSION, it) }
             `package` = packageName
         }
         try {
@@ -2088,6 +2108,7 @@ class BluetoothAncService : Service() {
             putExtra(EXTRA_DEVICE, deviceAddress)
             if (batteryPercent != null) putExtra(EXTRA_BATTERY, batteryPercent!!)
             putExtra(EXTRA_MODE, currentModeName)
+            fwVersion?.let { putExtra(EXTRA_FW_VERSION, it) }
             putExtra(EXTRA_EQ_ACTIVE_PRESET, eqActivePreset)
             eqActiveBands?.let { putExtra(EXTRA_EQ_ACTIVE_BANDS, it) }
             if (connectedDevices.isNotEmpty()) {
@@ -2274,6 +2295,7 @@ class BluetoothAncService : Service() {
         // Broadcast extras
         const val EXTRA_BATTERY = "battery"
         const val EXTRA_MODE = "mode"
+        const val EXTRA_FW_VERSION = "fw_version"
 
         // Reconnection
         // Bounded on purpose. The old budget of 20 attempts with a 48s ceiling

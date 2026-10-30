@@ -311,12 +311,25 @@ object SonyMdrV2 {
     // there is NO disable-reason field for this feature: StatusDisableReason in
     // the app belongs to the party-speaker and heart-rate-sensor features only.
     const val COMMON_TYPE_UPSCALING_EFFECT = 0x03
+
+    /**
+     * Firmware version readout — `12 09` → `13 09 <len> <ascii…>`.
+     *
+     * Confirmed from `ef0/l.java`: the reply validates as
+     * `bArr.length - 3 == bArr[2]`, i.e. the version is a length-prefixed
+     * string at offset 3. This is read-only on purpose; this app has no
+     * firmware updater (see sony-app-re/replacement-plan.md §3.1).
+     */
+    const val COMMON_TYPE_DISPLAY_FW_VERSION = 0x09
     const val UPSCALING_STATUS_OFF = 0x00
     const val UPSCALING_STATUS_VALID = 0x01
     const val UPSCALING_STATUS_INVALID = 0x02
 
     fun buildUpscalingStatusGet(): ByteArray =
         byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_UPSCALING_EFFECT.toByte())
+
+    fun buildFwVersionGet(): ByteArray =
+        byteArrayOf(CMD_COMMON_GET_STATUS.toByte(), COMMON_TYPE_DISPLAY_FW_VERSION.toByte())
 
     fun upscalingStatusName(v: Int): String = when (v) {
         UPSCALING_STATUS_OFF -> "off"
