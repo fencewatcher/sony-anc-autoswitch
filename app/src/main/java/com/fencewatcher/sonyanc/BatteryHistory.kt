@@ -36,6 +36,13 @@ object BatteryHistory {
     /** Identical level inside this window adds no information. */
     private const val DEDUPE_WINDOW_MS = 30_000L
 
+    /** A same-source drop this steep inside [IMPLAUSIBLE_WINDOW_MS] is a
+     *  misread, not a discharge: at any real drain rate the level cannot fall
+     *  ten points in five minutes. Keeping such a sample poisons both the
+     *  segment and the slope. */
+    private const val IMPLAUSIBLE_DROP = 10
+    private const val IMPLAUSIBLE_WINDOW_MS = 5L * 60 * 1000
+
     /** Minimum span of a discharge segment before a slope is believable. */
     private const val MIN_SEGMENT_SPAN_MS = 10L * 60 * 1000
 
@@ -80,6 +87,9 @@ object BatteryHistory {
             if (list.isNotEmpty()) {
                 val last = list.last()
                 if (now - last.t < DEDUPE_WINDOW_MS && last.p == percent) return
+                if (last.source == source && last.p - percent > IMPLAUSIBLE_DROP &&
+                    now - last.t < IMPLAUSIBLE_WINDOW_MS
+                ) return
             }
             list.add(Sample(now, percent, source, ctx))
             while (list.isNotEmpty() && now - list.first().t > MAX_AGE_MS) list.removeAt(0)

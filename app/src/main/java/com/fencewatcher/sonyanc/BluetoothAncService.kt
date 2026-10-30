@@ -1029,30 +1029,30 @@ class BluetoothAncService : Service() {
         val cmd = p[0].toInt() and 0xFF
         when (cmd) {
             0x23, 0x25 -> {  // battery RET / NTFY (single battery)
-                if (p.size >= 3) {
-                    val level = p[2].toInt() and 0xFF
-                    // Plausibility gate: 0 and >100 are not real battery levels.
-                    // A frame in this family with an unexpected layout read at
-                    // the same offset used to surface as a nonsense "0%" out of
-                    // nowhere. Keep the last good reading and log the frame so
-                    // the real layout can be learned from a capture.
-                    if (level in 1..100) {
-                        batteryPercent = level
-                        Log.d(tag, "Battery: $batteryPercent%")
-                        deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR, currentContext()) }
-                        refreshNotification()
-                        // Fire only on the crossing, not on every 60s poll — otherwise a
-                        // rule bound to "battery low" would re-run every minute.
-                        val low = batteryPercent!! < BATTERY_LOW_THRESHOLD
-                        if (low && !batteryLowFired) {
-                            batteryLowFired = true
-                            scope.launch { runAutomation(Automation.Trigger.BATTERY_LOW) }
-                        } else if (!low) {
-                            batteryLowFired = false
-                        }
-                    } else {
-                        Log.w(tag, "Implausible battery value $level ignored — ${SonyMdrV2.hex(p)}")
+                // Shape gate: a status frame is four bytes — cmd, seq, level,
+                // charging flag. The peripheral table reuses 0x25 for its own
+                // short notifications, and "25 02 01" arriving there was read
+                // at the level offset as a 1% battery: a phantom 1% on the
+                // card, a bad history sample, and a spurious low-battery rule.
+                // A charging flag outside 0..2 is not a battery reading either.
+                val level = if (p.size >= 4) p[2].toInt() and 0xFF else -1
+                val charging = if (p.size >= 4) p[3].toInt() and 0xFF else -1
+                if (level in 1..100 && charging in 0..2) {
+                    batteryPercent = level
+                    Log.d(tag, "Battery: $batteryPercent%")
+                    deviceAddress?.let { BatteryHistory.record(this, it, level, BatteryHistory.SOURCE_MDR, currentContext()) }
+                    refreshNotification()
+                    // Fire only on the crossing, not on every 60s poll — otherwise a
+                    // rule bound to "battery low" would re-run every minute.
+                    val low = batteryPercent!! < BATTERY_LOW_THRESHOLD
+                    if (low && !batteryLowFired) {
+                        batteryLowFired = true
+                        scope.launch { runAutomation(Automation.Trigger.BATTERY_LOW) }
+                    } else if (!low) {
+                        batteryLowFired = false
                     }
+                } else {
+                    Log.w(tag, "Not a battery frame, ignored — ${SonyMdrV2.hex(p)}")
                 }
             }
             0x67, 0x69 -> {  // NCASM RET / NTFY — mode may have changed on-device
