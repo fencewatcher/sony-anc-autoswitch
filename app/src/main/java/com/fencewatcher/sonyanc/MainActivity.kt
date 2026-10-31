@@ -717,12 +717,17 @@ class MainActivity : AppCompatActivity() {
         binding.seekVoiceGuidance.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: android.widget.SeekBar?, p: Int, fromUser: Boolean) {
                 if (!fromUser || updatingUi) return
-                // Slider is 0..4; the wire value is the signed scale -2..+2.
-                sendToService(ACTION_SET_VOICE_GUIDANCE) { putExtra("value", p - 2) }
+                // Label only while dragging. Sending here meant one SET frame
+                // per pixel — a two-second flood of "48 20 02 00" that jammed
+                // the table and starved every other command.
                 binding.textVoiceGuidanceValue?.text = "Level ${p - 2}"
             }
             override fun onStartTrackingTouch(sb: android.widget.SeekBar?) {}
-            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(sb: android.widget.SeekBar?) {
+                // Slider is 0..4; the wire value is the signed scale -2..+2.
+                val level = (sb?.progress ?: return) - 2
+                sendToService(ACTION_SET_VOICE_GUIDANCE) { putExtra("value", level) }
+            }
         })
 
         // EQ graph callbacks
@@ -1232,9 +1237,20 @@ class MainActivity : AppCompatActivity() {
             actionsBox.addView(row)
             actionRows.add(holder)
 
+            // Spinner fires a selection callback when the row is laid out, even
+            // though the selection was set before the listener existed. Refilling
+            // the value spinner there reset every stored action to the first item
+            // of its list — a saved "ambient" rule silently became "noise
+            // cancelling" the moment the editor was opened and saved, which is
+            // exactly the "pause leaves NC on" report. Only refill when the user
+            // actually changes the type.
+            var lastType = actionTypes.indexOf(a.type).coerceAtLeast(0)
             typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
-                    fillValues(actionTypes[pos], valueSp, 0)
+                    if (pos != lastType) {
+                        lastType = pos
+                        fillValues(actionTypes[pos], valueSp, 0)
+                    }
                     refreshPreview()
                 }
                 override fun onNothingSelected(p: AdapterView<*>?) {}
@@ -1360,6 +1376,8 @@ class MainActivity : AppCompatActivity() {
 
             typeSp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(p: AdapterView<*>?, v: View?, pos: Int, id: Long) {
+                    // applyType() only toggles visibility, so the initial callback
+                    // is safe here; it must not reset the stored values.
                     applyType()
                     refreshPreview()
                 }
