@@ -825,8 +825,12 @@ class BluetoothAncService : Service() {
                     runSweep()
                     delay(200L)
 
-                    Log.d(tag, "Handshake complete — re-applying automation rules")
-                    runAutomation(currentPlaybackTrigger())
+                    Log.d(tag, "Handshake complete — applying connect rules only")
+                    // The playback rule is deliberately not applied here. Its
+                    // input, isMediaPlaying, outlives the link: after a drop it
+                    // can still say "playing", so a reconnect re-imposed noise
+                    // cancelling over a headset that was sitting in ambient.
+                    // The monitor reports real transitions; those drive the rule.
                     runAutomation(Automation.Trigger.DEVICE_CONNECTED)
 
                     // Periodic battery refresh (every 60s) + ANC state re-sync

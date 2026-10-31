@@ -9,7 +9,7 @@ What that covers, and what it deliberately does not, is in
 
 **Media plays** → 🎧 **Noise Cancelling** | **Pause** → 🌬 **Ambient mode** | **Nothing playing** → 🔊 **Off**
 
-![v2.08](https://img.shields.io/badge/version-2.08-blue)
+![v2.09](https://img.shields.io/badge/version-2.09-blue)
 
 ---
 
