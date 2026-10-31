@@ -1872,15 +1872,15 @@ class MainActivity : AppCompatActivity() {
             ?: pairedDevices.getOrNull(binding.spinnerDevice.selectedItemPosition)?.name?.takeIf { it.isNotBlank() }
             ?: pairedDevices.firstOrNull()?.name?.takeIf { it.isNotBlank() }
             ?: "WH-1000XM6"
-        binding.textModel.text = name
-        // Subtitle only when it adds information. The name usually mentions
-        // the model already ("hbubli's WH-1000XM6"), so *containing* the model
-        // string hides it — equality alone left the model printed twice. And
-        // an empty TextView still occupies its line, hence the visibility
-        // toggle rather than empty text.
-        binding.textModelSub.text = "WH-1000XM6"
-        binding.textModelSub.visibility =
-            if (name.contains("WH-1000XM6", ignoreCase = true)) View.GONE else View.VISIBLE
+        // Model as the title, the person's own device name as the subtitle.
+        // The Bluetooth name is too long for this column: it ellipsised to
+        // "hbubli's WH-1000…", which reads worse than either half alone.
+        val model = "WH-1000XM6"
+        val subtitle = name.replace(model, "", ignoreCase = true)
+            .trim().trimEnd(',', '·', '-').trim()
+        binding.textModel.text = model
+        binding.textModelSub.text = subtitle
+        binding.textModelSub.visibility = if (subtitle.isEmpty()) View.GONE else View.VISIBLE
     }
 
     /** The app speaks the XM6 protocol and nothing else. */

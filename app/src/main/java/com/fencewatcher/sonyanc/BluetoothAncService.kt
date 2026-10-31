@@ -850,7 +850,12 @@ class BluetoothAncService : Service() {
                             } finally {
                                 sweepLock.unlock()
                             }
-                            runAutomation(currentPlaybackTrigger())
+                            // This loop exists to refresh readouts. It used to
+                            // re-apply the playback rule every minute, which
+                            // re-imposed a remembered "playing" long after the
+                            // app went quiet and flipped the headset to NC while
+                            // idle. Automation belongs on transitions.
+
                         }
                     }
 

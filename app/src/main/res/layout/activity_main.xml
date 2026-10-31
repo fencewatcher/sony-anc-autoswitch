@@ -229,7 +229,6 @@
                                     android:id="@+id/textMode"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginStart="8dp"
                                     android:background="@drawable/bg_chip"
                                     android:paddingHorizontal="10dp"
                                     android:paddingVertical="5dp"
@@ -814,7 +813,8 @@
                             android:id="@+id/seekVoiceGuidance"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1" />
+                            android:layout_weight="1"     android:max="4"
+                />
 
                         <TextView
                             android:id="@+id/textVoiceGuidanceValue"
