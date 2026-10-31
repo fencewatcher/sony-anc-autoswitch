@@ -1696,6 +1696,29 @@ class BluetoothAncService : Service() {
      * now just the *default* rule set, so the behaviour is the user's choice
      * rather than an assumption baked into the app.
      */
+    /**
+     * What mode the headphones are in right now — asked of the headphones.
+     *
+     * Rules used to decide from remembered state, which outlives the link: a
+     * stale "playing" or a mode changed on the headset itself would survive a
+     * drop and be re-imposed on the next apply. Reading back first means a
+     * rule sends a frame only when the device actually disagrees, and the
+     * decision is grounded in the present instead of the past.
+     */
+    private suspend fun modeOnDevice(): String? {
+        val p = request(profile.ancInquiry, attempts = 1) ?: return null
+        if (p.size < 5) return null
+        val idx = if (p.size >= 9) 3 else 2
+        val totalEffect = p[idx].toInt() and 0xFF
+        val mode = p[idx + 1].toInt() and 0xFF
+        val level = if (p.size >= idx + 4) p[idx + 3].toInt() and 0xFF else 0
+        return when {
+            totalEffect == 0x00 -> "Off"
+            mode == 0x01 -> "Ambient $level"
+            else -> "NC"
+        }
+    }
+
     private suspend fun runAutomation(trigger: Automation.Trigger) {
         // The single choke point for every automated command, so the pause check
         // belongs here rather than in one caller. Guarding only onMediaStateChanged
@@ -1722,10 +1745,26 @@ class BluetoothAncService : Service() {
         for (action in rule.actions) {
             when (action.type) {
                 Automation.ActionType.NONE -> Unit
-                Automation.ActionType.SET_MODE -> when (action.mode) {
-                    Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
-                    Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
-                    Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
+                Automation.ActionType.SET_MODE -> {
+                    // Re-sync before acting: ask what the headset is doing and
+                    // send only if it disagrees. A failed query falls through to
+                    // sending, which is the old behaviour and never leaves the
+                    // requested mode unapplied.
+                    val target = when (action.mode) {
+                        Automation.Mode.NC -> "NC"
+                        Automation.Mode.AMBIENT -> "Ambient"
+                        Automation.Mode.OFF -> "Off"
+                    }
+                    val actual = modeOnDevice()
+                    if (actual != null && actual.startsWith(target)) {
+                        Log.d(tag, "Automation: already in $actual — nothing to send")
+                    } else {
+                        when (action.mode) {
+                            Automation.Mode.NC -> sendFrame(profile.ancOn(ambientLevel()))
+                            Automation.Mode.AMBIENT -> sendFrame(sonyAmbientCommand())
+                            Automation.Mode.OFF -> sendFrame(profile.ancOff(ambientLevel()))
+                        }
+                    }
                 }
                 Automation.ActionType.SET_AMBIENT_LEVEL -> {
                     // Was `profile.ancOn(action.value)`, which builds
