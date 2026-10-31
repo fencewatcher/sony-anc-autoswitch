@@ -28,6 +28,7 @@ object Automation {
 
     private const val TAG = "Automation"
     const val PREFS = "anc_automation"
+    private const val KEY_REPAIRED = "rules_repaired_v210"
 
     // ---- Triggers ----
 
@@ -158,13 +159,52 @@ object Automation {
     // ---- Storage ----
 
     fun load(context: Context): List<Rule> {
-        val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("rules", null)
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val raw = prefs.getString("rules", null)
         if (raw.isNullOrBlank()) return defaultRules()
-        return runCatching { parse(JSONArray(raw)) }
+        val parsed = runCatching { parse(JSONArray(raw)) }
             .getOrElse {
                 Log.w(TAG, "Rule parse failed, using defaults: ${it.message}")
-                defaultRules()
+                return defaultRules()
             }
+        val repaired = repairCorruptedStopRule(prefs, parsed)
+        repaired.forEach { Log.d(TAG, "rule ${it.id}: ${it.trigger.id} → ${describe(it)}") }
+        return repaired
+    }
+
+    /**
+     * One-time repair for rules damaged by the 2.04/2.05 editor, which refilled
+     * the value spinner on first layout and saved every action as its first
+     * entry. "Playback stops" was therefore stored as noise cancelling, which is
+     * why pausing turned NC *on* instead of engaging ambient.
+     *
+     * Narrow on purpose: only the factory ids, only when both halves ended up
+     * identical, and only once — a deliberate "NC always" setup is one edit away
+     * if the guess is wrong, while the alternative is a bug the user cannot see
+     * anywhere in the UI.
+     */
+    private fun repairCorruptedStopRule(
+        prefs: android.content.SharedPreferences,
+        rules: List<Rule>,
+    ): List<Rule> {
+        if (prefs.getBoolean(KEY_REPAIRED, false)) return rules
+        val start = rules.firstOrNull { it.id == "start" }
+        val stop = rules.firstOrNull { it.id == "stop" }
+        val bothNc = start != null && stop != null &&
+            start.actions.singleOrNull()?.let { it.type == ActionType.SET_MODE && it.mode == Mode.NC } == true &&
+            stop.actions.singleOrNull()?.let { it.type == ActionType.SET_MODE && it.mode == Mode.NC } == true
+        prefs.edit().putBoolean(KEY_REPAIRED, true).apply()
+        if (!bothNc) return rules
+        Log.w(TAG, "Repairing a stop rule saved as noise cancelling — restoring ambient")
+        val fixed = rules.map {
+            if (it.id == "stop") it.copy(actions = listOf(Action(ActionType.SET_MODE, Mode.AMBIENT))) else it
+        }
+        save(prefs, fixed)
+        return fixed
+    }
+
+    private fun save(prefs: android.content.SharedPreferences, rules: List<Rule>) {
+        prefs.edit().putString("rules", encode(rules).toString()).apply()
     }
 
     fun save(context: Context, rules: List<Rule>) {
