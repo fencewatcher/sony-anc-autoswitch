@@ -52,10 +52,14 @@ class MediaPlaybackMonitor(
     fun start() {
         if (polling) return
         polling = true
-        val initialPlaying = decide()
-        lastReportedPlaying = initialPlaying
-        Log.d(tag, "Initial: ${if (initialPlaying) "PLAYING" else "SILENT"}")
-        onPlaybackChanged(initialPlaying)
+        // No immediate report. At connection time isMusicActive can read true
+        // for a moment while the audio route settles, and that single raw
+        // sample was trusted as the playback state: a rule fired "playback
+        // started" and switched to noise cancelling, then the honest state
+        // arrived a second later and switched back. The debounce now produces
+        // the first state too, so a transient cannot drive a rule.
+        lastReportedPlaying = null
+        pendingCount = 0
         mainHandler.post(pollRunnable)
     }
 
